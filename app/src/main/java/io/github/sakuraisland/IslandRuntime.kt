@@ -58,6 +58,8 @@ class IslandRuntime(val host: View) {
     private var replyDialog: AlertDialog? = null
     private var selectedNotificationKey: String? = null
     private var animator: ValueAnimator? = null
+    private var targetWidth = -1
+    private var targetHeight = -1
     private val hiddenIcons = linkedMapOf<View, Float>()
     private val panel = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_VERTICAL
@@ -541,6 +543,12 @@ class IslandRuntime(val host: View) {
             else -> compactHeight
         }
 
+        // Only request a refresh rate the physical panel actually advertises.
+        // This cannot force 120Hz when HyperOS/thermal/display mode does not allow it.
+        val supportedHz = host.display?.supportedModes?.map { it.refreshRate }?.filter { it > 0f }.orEmpty()
+        val chosenHz = supportedHz.filter { it <= 121f }.maxOrNull() ?: 0f
+        val requestedHz = if(enabled("high_refresh") && chosenHz > 60f) chosenHz else 0f
+        if (params.preferredRefreshRate != requestedHz) params.preferredRefreshRate = requestedHz
         params.flags = params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
         if (event == null) {
             params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
@@ -628,6 +636,7 @@ class IslandRuntime(val host: View) {
 
         if (!attached) {
             params.width = width; params.height = height
+            targetWidth = width; targetHeight = height
             window.addView(panel, params); attached = true
             Diagnostics.record("Sakura island window attached")
             // Read-only dimensions collected on the device, never hardcoded from APK mockups.
@@ -658,13 +667,20 @@ class IslandRuntime(val host: View) {
         return (minOf(centerX - left, right - centerX).coerceAtLeast(dp(20)) * 2)
     }
     private fun animateSize(w: Int, h: Int) {
+        // SystemUI frequently emits duplicate layout callbacks, including once
+        // per animation frame. Do not restart an in-flight size animation.
+        if (targetWidth == w && targetHeight == h && animator?.isRunning == true) return
+        targetWidth = w; targetHeight = h
         animator?.cancel()
         if (!enabled("motion")) {
             params.width = w; params.height = h
             if (attached) window.updateViewLayout(panel, params)
             return
         }
-        if (params.width == w && params.height == h) { window.updateViewLayout(panel, params); return }
+        if (params.width == w && params.height == h) {
+            if (attached) window.updateViewLayout(panel, params)
+            return
+        }
         val fromW = params.width; val fromH = params.height
         animator = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = value("speed", 100, 700).toLong()
@@ -690,7 +706,9 @@ class IslandRuntime(val host: View) {
     }
     private fun restoreIcons() { hiddenIcons.forEach { (v, alpha) -> if (v.alpha == 0f) v.alpha = alpha }; hiddenIcons.clear() }
     private fun hide() {
-        animator?.cancel(); animator = null; main.removeCallbacks(progressTick); restoreIcons()
+        animator?.cancel(); animator = null
+        targetWidth = -1; targetHeight = -1
+        main.removeCallbacks(progressTick); restoreIcons()
         if (attached) { try { window.removeViewImmediate(panel) } catch (_: Exception) { }; attached = false }
     }
     fun dispose() {
