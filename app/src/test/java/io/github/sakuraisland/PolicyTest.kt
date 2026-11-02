@@ -26,6 +26,60 @@ class PolicyTest {
     @Test fun expiredAndEmptyAreHidden() {
         assertNull(Policy.select(emptyList(), 0)); assertNull(Policy.select(listOf(EventRank("a", 1, 0, 10)), 10))
     }
+    @Test fun allAppsCoversNormalAppNotifications() {
+        assertTrue(Policy.allowNotificationPackage("com.google.android.apps.messaging", true, "com.whatsapp"))
+        assertTrue(Policy.allowNotificationPackage("com.whatsapp", true, ""))
+        assertFalse(Policy.allowNotificationPackage("", true, ""))
+    }
+    @Test fun packageFilterUsesExactIdsNotSubstrings() {
+        assertTrue(Policy.allowNotificationPackage("org.telegram.messenger", false, "com.whatsapp, org.telegram.messenger"))
+        assertFalse(Policy.allowNotificationPackage("org.telegram.messenger.fake", false, "org.telegram.messenger"))
+        assertFalse(Policy.allowNotificationPackage("com.google.android.apps.messaging", false, "com.whatsapp"))
+        assertFalse(Policy.allowNotificationPackage("com.whatsapp", false, ""))
+    }
+    @Test fun alertCardsGrowForLongerMessagesButStayBounded() {
+        assertEquals(1, Policy.alertPreviewLines("Hey"))
+        assertEquals(2, Policy.alertPreviewLines("A".repeat(45)))
+        assertEquals(6, Policy.alertPreviewLines("A".repeat(500)))
+        assertEquals(2, Policy.alertPreviewLines("short\nother message of medium length"))
+    }
+    @Test fun cameraGapNeverAllowsTextOverLens() {
+        assertEquals(128, Policy.compactSideWidth(420, 80, 42))
+        assertEquals(0, Policy.compactSideWidth(150, 100, 30))
+    }
+    @Test fun variableAlertHeightIsBounded() {
+        assertTrue(Policy.alertCardHeightDp(4, 42, true) >
+            Policy.alertCardHeightDp(1, 42, true))
+        assertTrue(Policy.alertCardHeightDp(6, 160, true) <= 320)
+    }
+    @Test fun onlyOrdinaryAlertsCanReplaceHeadsUp() {
+        assertTrue(Policy.mayReplaceHeadsUp("notification", false, true, false, false))
+        assertFalse(Policy.mayReplaceHeadsUp("call", false, true, false, false))
+        assertFalse(Policy.mayReplaceHeadsUp("notification", true, true, false, false))
+        assertFalse(Policy.mayReplaceHeadsUp("notification", false, false, true, false))
+        assertFalse(Policy.mayReplaceHeadsUp("notification", false, true, false, true))
+    }
+    @Test fun fractionalOemBatteryUsesSystemBroadcastAsSanityCheck() {
+        assertTrue(Policy.validOemBatteryLevel(89.83f, 89))
+        assertFalse(Policy.validOemBatteryLevel(0.89f, 89))
+        assertFalse(Policy.validOemBatteryLevel(99f, 89))
+        assertFalse(Policy.validOemBatteryLevel(Float.NaN, 89))
+    }
+    @Test fun notificationQueueWrapsSafely() {
+        val keys = listOf("new", "middle", "old")
+        assertEquals("middle", Policy.nextAlertKey(keys, "new"))
+        assertEquals("new", Policy.nextAlertKey(keys, "old"))
+        assertEquals("new", Policy.nextAlertKey(keys, "missing"))
+        assertNull(Policy.nextAlertKey(emptyList(), null))
+    }
+    @Test fun actionableXiaomiChargeBoostPreemptsPassiveBatteryCard() {
+        assertTrue(Policy.isXiaomiChargeBoost("com.miui.securitycenter",
+            "Stop boosting charging speed", true))
+        assertFalse(Policy.isXiaomiChargeBoost("com.miui.securitycenter",
+            "Stop boosting charging speed", false))
+        assertFalse(Policy.isXiaomiChargeBoost("com.whatsapp",
+            "Stop boosting charging speed", true))
+    }
     @Test fun exactTargetOnly() {
         assertTrue(Policy.target(34, "taoyao", "OS1.0.39.0.ULIEUXM"))
         assertFalse(Policy.target(35, "taoyao", "OS1.0.39.0.ULIEUXM"))

@@ -1,4 +1,4 @@
-plugins { id("com.android.application"); id("org.jetbrains.kotlin.android") }
+plugins { id("com.android.application"); id("org.jetbrains.kotlin.android"); id("org.jetbrains.kotlin.plugin.compose") }
 android {
     namespace = "io.github.sakuraisland"
     compileSdk = 35
@@ -6,9 +6,10 @@ android {
         applicationId = "io.github.sakuraisland"
         minSdk = 34
         targetSdk = 34
-        versionCode = 2
-        versionName = "0.1.1-experimental"
+        versionCode = 5
+        versionName = "0.4.0-experimental"
     }
+    buildFeatures { compose = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }
     signingConfigs {
@@ -24,5 +25,12 @@ android {
 dependencies {
     compileOnly("de.robv.android.xposed:api:82")
     implementation("com.google.android.material:material:1.12.0")
+    implementation(platform("androidx.compose:compose-bom:2025.04.01"))
+    implementation("androidx.activity:activity-compose:1.10.1")
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.foundation:foundation")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended")
+    debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
 }
