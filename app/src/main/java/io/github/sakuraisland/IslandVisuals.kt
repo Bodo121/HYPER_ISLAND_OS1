@@ -338,13 +338,13 @@ internal class IslandVisuals(private val context: Context, private val panel: Li
                 marginStart=dp(6)
             })
         }
-        // Preserve the most useful safe one-tap native action (e.g. Xiaomi's
-        // "Stop" charging boost). RemoteInput actions remain in the shade;
-        // do not fabricate a reply composer inside a non-focusable window.
-        e.actions.firstOrNull()?.let { native ->
+        // Actual Android RemoteInput is handled by a focusable SystemUI dialog,
+        // never an inert button. Native direct actions keep their PendingIntents.
+        if (e.reply != null) actionChip("Reply", true) { action("reply") }
+        if (e.reply == null) e.actions.firstOrNull()?.let { native ->
             actionChip(native.title, true) { action("notification_action_0") }
         }
-        if(e.intent != null) actionChip("Open", e.actions.isEmpty()) { action("open") }
+        if(e.intent != null) actionChip("Open", e.reply == null && e.actions.isEmpty()) { action("open") }
         actionChip("Close",false) { action("collapse") }
         panel.addView(actions,LinearLayout.LayoutParams(-1,dp(36)).apply { topMargin=dp(8) })
     }
