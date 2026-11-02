@@ -45,7 +45,7 @@ class SystemUiHook : IXposedHookLoadPackage {
         val incremental = property("ro.mi.os.version.incremental")
         val version = Policy.romVersion(incremental, Build.VERSION.INCREMENTAL, name)
         val compatible = Policy.target(Build.VERSION.SDK_INT, Build.DEVICE, version)
-        Diagnostics.record("SakuraIsland 0.3 experimental; SDK=${Build.VERSION.SDK_INT}; device=${Build.DEVICE}; ROM=$version; exactTarget=$compatible")
+        Diagnostics.record("SakuraIsland 0.4 experimental; SDK=${Build.VERSION.SDK_INT}; device=${Build.DEVICE}; ROM=$version; exactTarget=$compatible")
         Diagnostics.record("ro.mi.os.version.name=$name")
         Diagnostics.record("ro.mi.os.version.incremental=$incremental")
         Diagnostics.record("ro.build.version.incremental=${Build.VERSION.INCREMENTAL}")
@@ -253,7 +253,8 @@ class SystemUiHook : IXposedHookLoadPackage {
             names.forEach { name ->
                 val cls = XposedHelpers.findClassIfExists(name, loader) ?: return@forEach
                 cls.declaredMethods.filter { method ->
-                    method.name == "shouldHeadsUp" && method.returnType == Boolean::class.javaPrimitiveType &&
+                    method.name in setOf("shouldHeadsUp", "shouldHeadsUpEver", "shouldHeadsUpAgain") &&
+                        method.returnType == Boolean::class.javaPrimitiveType &&
                         method.parameterTypes.isNotEmpty() &&
                         method.parameterTypes.first().name ==
                             "com.android.systemui.statusbar.notification.collection.NotificationEntry" &&
