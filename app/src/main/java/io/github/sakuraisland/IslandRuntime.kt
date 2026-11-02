@@ -304,15 +304,16 @@ class IslandRuntime(val host: View) {
             currentKey = null; expanded = false; hide(); return
         }
         if (currentKey != key) {
-            expanded = key != null && key == autoExpandKey
+            expanded = false
             currentKey = key
         }
-        // A new app alert should be visible as an expanded card, not just a dot
-        // hidden next to the camera. Auto-collapse after a short reading window.
-        if (key != null && key == autoExpandKey && expanded) {
+        // Updating the same app notification key with a new message should
+        // re-open the preview as well, rather than leave the island collapsed.
+        if (key != null && key == autoExpandKey && eligible()) {
+            expanded = true
             autoExpandKey = null
             main.removeCallbacks(collapse)
-            main.postDelayed(collapse, 4500L)
+            main.postDelayed(collapse, 5200L)
         }
         if (event != null) {
             val nextExpiry = events.values.minOfOrNull { it.expires } ?: Long.MAX_VALUE
