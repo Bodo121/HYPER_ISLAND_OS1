@@ -193,6 +193,52 @@ class SystemUiHook : IXposedHookLoadPackage {
                 Diagnostics.record("HOOK fallback ${method.toGenericString()}")
             }
         }
-        Diagnostics.record("Notification observation callbacks installed=$hooks; native heads-up preserved")
+        // Replace only the native visual heads-up banner *after* the matching
+        // island event has actually attached and expanded. We never hook
+        // NotificationManagerService or cancel an Android notification.
+        // Because we are inside SystemUI via LSPosed, no root shell daemon
+        // or global heads_up_notifications_enabled setting is needed.
+        Diagnostics.guard("heads-up replacement setup") {
+            val candidateTypes = listOf(
+                "com.android.systemui.statusbar.AlertingNotificationManager",
+                "com.android.systemui.statusbar.policy.HeadsUpManager",
+                "com.android.systemui.statusbar.phone.HeadsUpManagerPhone"
+            )
+            var replacements = 0
+            candidateTypes.forEach { className ->
+                val cls = XposedHelpers.findClassIfExists(className, loader) ?: return@forEach
+                cls.declaredMethods.filter { method ->
+                    method.name == "showNotification" &&
+                        method.returnType == Void.TYPE &&
+                        method.parameterTypes.size == 1 &&
+                        method.parameterTypes[0].name ==
+                            "com.android.systemui.statusbar.notification.collection.NotificationEntry"
+                }.forEach { method ->
+                    Diagnostics.guard("heads-up replacement hook") {
+                        XposedBridge.hookMethod(method, object : XC_MethodHook() {
+                            override fun beforeHookedMethod(param: MethodHookParam) {
+                                val entry = param.args.firstOrNull() ?: return
+                                val sbn = try {
+                                    XposedHelpers.callMethod(entry, "getSbn") as? StatusBarNotification
+                                } catch (_: Throwable) { null } ?: return
+                                // A failure in the island must always leave Xiaomi's
+                                // original heads-up pipeline working as a fallback.
+                                val replace = try {
+                                    runtime?.showInsteadOfHeadsUp(sbn) == true
+                                } catch (t: Throwable) {
+                                    Diagnostics.record("Heads-up fallback: ${t.javaClass.simpleName}")
+                                    false
+                                }
+                                if (replace) param.result = null
+                            }
+                        })
+                        replacements++
+                        Diagnostics.record("HOOK guarded native heads-up ${method.toGenericString()}")
+                    }
+                }
+            }
+            Diagnostics.record("Guarded heads-up replacements installed=$replacements")
+        }
+        Diagnostics.record("Notification observation callbacks installed=$hooks; heads-up replaced only for verified island cards")
     }
 }
