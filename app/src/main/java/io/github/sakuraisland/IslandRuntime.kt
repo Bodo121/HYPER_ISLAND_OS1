@@ -74,10 +74,11 @@ class IslandRuntime(val host: View) {
                     val level = i.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
                     val scale = i.getIntExtra(BatteryManager.EXTRA_SCALE, 100).coerceAtLeast(1)
                     if (enabled("charging") && charging && !wasCharging) {
-                        events["battery"] = IslandEvent("battery", "Charging", "${level * 100 / scale}% battery", 20,
+                        events["battery"] = IslandEvent("battery", "Charging", "${level * 100 / scale}% battery", 85,
                             expires = SystemClock.elapsedRealtime() + 6000,
                             kind = "charging"); redraw()
                     }
+                    if (!charging) events.remove("battery")
                     wasCharging = charging
                 }
             }
@@ -194,11 +195,12 @@ class IslandRuntime(val host: View) {
         val cutoutWidth = (cutout?.width() ?: dp(12)) + dp(12)
         val compactHeight = maxOf(dp(value("height", 28, 52)), (cutout?.bottom ?: 0) - params.y + dp(5))
         val safeWidth = safeCompactWidth(centerX, screenWidth).coerceAtLeast(cutoutWidth)
-        val compactWidth = minOf(maxOf(dp(value("width", 120, 240)), cutoutWidth), safeWidth)
+        val compactWidth = minOf(maxOf(dp(value("width", 120, 240)), cutoutWidth + dp(58)), safeWidth)
+        val cameraOnly = compactWidth < cutoutWidth + dp(58)
         val width = when {
             expanded -> minOf(dp(352), screenWidth - dp(18))
             event == null -> minOf(maxOf(dp(40), cutoutWidth), safeWidth)
-            else -> compactWidth
+            else -> if (cameraOnly) maxOf(dp(40), cutoutWidth) else compactWidth
         }
         val height = if (expanded) maxOf(dp(268), compactHeight + dp(215)) else compactHeight
 
@@ -208,7 +210,12 @@ class IslandRuntime(val host: View) {
             visuals.idle()
         } else {
             val clearance = ((cutout?.bottom ?: dp(25)) - params.y + dp(8)).coerceAtLeast(dp(30))
-            visuals.render(event, expanded, clearance, compactWidth, enabled("chroma"), enabled("motion")) { which ->
+            // The camera occupies a real hole in the display; render an unobstructed
+            // fallback capsule rather than squeezing album artwork over that hole.
+            if (!expanded && cameraOnly) {
+                visuals.idle()
+            } else visuals.render(event, expanded, clearance, cutoutWidth + dp(8),
+                compactHeight, enabled("chroma"), enabled("motion")) { which ->
                 safe {
                     when (which) {
                         "previous" -> event.media?.transportControls?.skipToPrevious()
@@ -263,20 +270,25 @@ class IslandRuntime(val host: View) {
         manageIcons()
     }
 
-    /** Restrict compact width to the actual clock/icon space instead of covering status icons. */
+    /** Ignore wide SystemUI parent containers: they include the camera but are not icons. */
     private fun safeCompactWidth(centerX: Int, screenWidth: Int): Int {
         var left = dp(8)
         var right = screenWidth - dp(8)
-        val statusRect = Rect()
-        listOf("clock", "notificationIcons", "statusIcons").forEach { name ->
+        val rect = Rect()
+        val names = listOf("clock", "notificationIcons", "statusIcons",
+            "notification_icon_area_inner", "status_bar_clock", "system_icons")
+        for (name in names) {
             val id = context.resources.getIdentifier(name, "id", "com.android.systemui")
-            if (id == 0) return@forEach
-            val view = host.rootView.findViewById<View>(id) ?: return@forEach
-            if (!view.isShown || !view.getGlobalVisibleRect(statusRect)) return@forEach
-            if (statusRect.right <= centerX) left = maxOf(left, statusRect.right + dp(6))
-            else if (statusRect.left >= centerX) right = minOf(right, statusRect.left - dp(6))
+            if (id == 0) continue
+            val view = host.rootView.findViewById<View>(id) ?: continue
+            if (!view.isShown || !view.getGlobalVisibleRect(rect)) continue
+            // Containers spanning the cutout were erroneously reducing the music pill
+            // to ~40dp and pushing album art directly onto the physical lens.
+            if (rect.width() > screenWidth / 3 || rect.contains(centerX, rect.centerY())) continue
+            if (rect.right < centerX) left = maxOf(left, rect.right + dp(6))
+            if (rect.left > centerX) right = minOf(right, rect.left - dp(6))
         }
-        return (minOf(centerX-left, right-centerX).coerceAtLeast(dp(16)) * 2)
+        return (minOf(centerX - left, right - centerX).coerceAtLeast(dp(20)) * 2)
     }
     private fun animateSize(w: Int, h: Int) {
         animator?.cancel()
