@@ -23,7 +23,8 @@ data class IslandEvent(val key: String, val title: String, val text: String, val
     val intent: PendingIntent? = null, val art: Bitmap? = null, val media: MediaController? = null,
     val dismissible: Boolean = true, val kind: String = "notification",
     val appIcon: android.graphics.drawable.Drawable? = null,
-    val actions: List<IslandAction> = emptyList(), val appLabel: String? = null)
+    val actions: List<IslandAction> = emptyList(), val appLabel: String? = null,
+    val chargingBoost: Boolean = false)
 
 class IslandRuntime(val host: View) {
     private val context = host.context
@@ -204,8 +205,11 @@ class IslandRuntime(val host: View) {
         }
         val call = n.category == Notification.CATEGORY_CALL || n.category == Notification.CATEGORY_MISSED_CALL
         val timer = n.category == Notification.CATEGORY_ALARM || n.category == Notification.CATEGORY_STOPWATCH
+        val boost = Policy.isXiaomiChargeBoost(sbn.packageName,
+            n.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty(),
+            n.actions?.any { it.actionIntent != null && it.remoteInputs.isNullOrEmpty() } == true)
         if (n.category == Notification.CATEGORY_TRANSPORT) return@safe
-        if (!call && !timer && n.flags and Notification.FLAG_FOREGROUND_SERVICE != 0) return@safe
+        if (!call && !timer && !boost && n.flags and Notification.FLAG_FOREGROUND_SERVICE != 0) return@safe
         val allowed = Policy.allowNotificationPackage(sbn.packageName, enabled("all_apps"),
             options["apps"].orEmpty())
         if ((call && !enabled("calls")) || (timer && !enabled("timers")) ||
@@ -235,7 +239,7 @@ class IslandRuntime(val host: View) {
             IslandAction(it.title?.toString()?.take(32) ?: "Action", it.actionIntent)
         }?.toList().orEmpty()
         // No raw message content is recorded in diagnostics.
-        events[id] = IslandEvent(id, heading, preview.take(750), if (call) 100 else if (timer) 80 else 65,
+        events[id] = IslandEvent(id, heading, preview.take(750), if (call) 100 else if (boost) 92 else if (timer) 80 else 65,
             now, now + if (call || timer) 30000 else 8500,
             n.contentIntent, dismissible = sbn.isClearable && !call && !timer,
             kind = if (call) "call" else if (timer) "timer" else "notification",
@@ -244,7 +248,7 @@ class IslandRuntime(val host: View) {
             appLabel = runCatching {
                 context.packageManager.getApplicationLabel(
                     context.packageManager.getApplicationInfo(sbn.packageName, 0)).toString().take(30)
-            }.getOrNull())
+            }.getOrNull(), chargingBoost = boost)
         while (events.size > 32) events.remove(events.keys.firstOrNull { it != "media" } ?: break)
         if (enabled("auto_expand_notifications") && !call && !timer) autoExpandKey = id
         selectedNotificationKey = null
@@ -279,10 +283,7 @@ class IslandRuntime(val host: View) {
         // Xiaomi's "Stop boosting charging speed" is an actionable ongoing
         // Security/PowerKeeper banner. Permit replacing *only this kind* of
         // OEM banner after its real Stop action has been copied into the card.
-        val boostedCharging = (sbn.packageName == "com.miui.securitycenter" ||
-            sbn.packageName == "com.miui.powerkeeper") &&
-            title.contains("boost", ignoreCase = true) &&
-            title.contains("charg", ignoreCase = true) && hasSimpleAction
+        val boostedCharging = Policy.isXiaomiChargeBoost(sbn.packageName, title, hasSimpleAction)
         if (sbn.packageName == "com.android.systemui" || n.fullScreenIntent != null ||
             n.category == Notification.CATEGORY_CALL ||
             n.category == Notification.CATEGORY_MISSED_CALL ||
@@ -359,7 +360,8 @@ class IslandRuntime(val host: View) {
             expires=SystemClock.elapsedRealtime() + 6500L)
         if (enabled("charging_expand")) autoExpandKey = "battery"
         redraw()
-        val replaced = attached && panel.isAttachedToWindow && currentKey == "battery"
+        val replaced = attached && panel.isAttachedToWindow &&
+            (currentKey == "battery" || (events[currentKey]?.chargingBoost == true && expanded))
         if (replaced) {
             Diagnostics.record("Replaced Xiaomi charging toast with native data; fractionalLevel=${calibrated != null}")
             Diagnostics.publish(context)
