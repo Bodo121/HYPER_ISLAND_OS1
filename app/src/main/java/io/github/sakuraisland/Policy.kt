@@ -48,5 +48,10 @@ object Policy {
         return keys[(index + 1) % keys.size]
     }
 
+    fun isXiaomiChargeBoost(packageName: String, title: String, hasAction: Boolean): Boolean =
+        hasAction && packageName in setOf("com.miui.securitycenter", "com.miui.powerkeeper") &&
+            title.contains("boost", ignoreCase = true) &&
+            title.contains("charg", ignoreCase = true)
+
     fun dimension(value: Int, min: Int, max: Int) = value.coerceIn(min, max)
 }
