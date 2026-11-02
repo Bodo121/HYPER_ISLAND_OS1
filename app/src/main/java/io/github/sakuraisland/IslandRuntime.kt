@@ -80,9 +80,12 @@ class IslandRuntime(val host: View) {
                     val level = i.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
                     val scale = i.getIntExtra(BatteryManager.EXTRA_SCALE, 100).coerceAtLeast(1)
                     if (enabled("charging") && charging && !wasCharging) {
-                        events["battery"] = IslandEvent("battery", "Charging", "${level * 100 / scale}% battery", 85,
+                        val batteryLabel = if(level in 0..scale) "${level * 100 / scale}% battery" else "Charging connected"
+                        events["battery"] = IslandEvent("battery", "Charging", batteryLabel, 85,
                             expires = SystemClock.elapsedRealtime() + 6000,
-                            kind = "charging"); redraw()
+                            kind = "charging")
+                        if (enabled("charging_expand")) autoExpandKey = "battery"
+                        redraw()
                     }
                     if (!charging && wasCharging) {
                         events.remove("battery")
@@ -419,8 +422,9 @@ class IslandRuntime(val host: View) {
                             event.intent?.send()
                             expanded = false; redraw()
                         }
-                        "notification_action_0" -> {
-                            event.actions.firstOrNull()?.intent?.send()
+                        "notification_action_0", "notification_action_1" -> {
+                            val index = if(which.endsWith("1")) 1 else 0
+                            event.actions.getOrNull(index)?.intent?.send()
                             events.remove(event.key)
                             expanded = false; redraw()
                         }
@@ -448,7 +452,30 @@ class IslandRuntime(val host: View) {
             // Do not swallow ACTION_DOWN on the root panel: doing so prevents
             // descendants (transport controls and scrubbing) from getting touches.
             // The parent click handler expands/collapses only on empty content.
-            panel.setOnTouchListener(null)
+            // Compact gestures do not contain any actionable child controls.
+            // Expanded views release all pointer events to their real buttons/seekbar.
+            if (!expanded) {
+                val gestures = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
+                    override fun onDown(e: MotionEvent): Boolean = true
+                    override fun onSingleTapUp(e: MotionEvent): Boolean {
+                        panel.performClick()
+                        return true
+                    }
+                    override fun onLongPress(e: MotionEvent) {
+                        expanded = true
+                        redraw()
+                    }
+                    override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float): Boolean {
+                        val horizontal = kotlin.math.abs(velocityX) > kotlin.math.abs(velocityY)
+                        if(horizontal && event.kind == "notification" && enabled("notification_queue")) {
+                            nextNotification()
+                            return true
+                        }
+                        return false
+                    }
+                })
+                panel.setOnTouchListener { _, motion -> gestures.onTouchEvent(motion) }
+            } else panel.setOnTouchListener(null)
             if (expanded && event.media != null) main.postDelayed(progressTick,1000L)
         }
 
@@ -493,7 +520,8 @@ class IslandRuntime(val host: View) {
         if (params.width == w && params.height == h) { window.updateViewLayout(panel, params); return }
         val fromW = params.width; val fromH = params.height
         animator = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = value("speed", 100, 700).toLong(); interpolator = DecelerateInterpolator()
+            duration = value("speed", 100, 700).toLong()
+            interpolator = android.view.animation.PathInterpolator(.22f, 0f, .12f, 1f)
             addUpdateListener { animation -> safe {
                 val f = animation.animatedValue as Float
                 params.width = (fromW + (w - fromW) * f).toInt(); params.height = (fromH + (h - fromH) * f).toInt()
