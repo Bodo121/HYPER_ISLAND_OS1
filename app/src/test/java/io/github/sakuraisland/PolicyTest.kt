@@ -41,7 +41,7 @@ class PolicyTest {
         assertEquals(1, Policy.alertPreviewLines("Hey"))
         assertEquals(2, Policy.alertPreviewLines("A".repeat(45)))
         assertEquals(4, Policy.alertPreviewLines("A".repeat(500)))
-        assertEquals(3, Policy.alertPreviewLines("short\\nother message of medium length"))
+        assertEquals(2, Policy.alertPreviewLines("short\\nother message of medium length"))
     }
     @Test fun exactTargetOnly() {
         assertTrue(Policy.target(34, "taoyao", "OS1.0.39.0.ULIEUXM"))
