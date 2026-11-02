@@ -54,7 +54,7 @@ class IslandRuntime(val host: View) {
     private var errors = 0
     private var currentKey: String? = null
     private var autoExpandKey: String? = null
-    private val repliedKeys = mutableMapOf<String, Long>()
+    private val repliedKeys = mutableMapOf<String, Pair<Long, String>>()
     private var replyDialog: AlertDialog? = null
     private var selectedNotificationKey: String? = null
     private var animator: ValueAnimator? = null
@@ -201,12 +201,23 @@ class IslandRuntime(val host: View) {
             if (old != null) recentDelivery.remove(old)
         }
         val n = sbn.notification
-        repliedKeys.entries.removeAll { it.value < now }
-        // Local apps commonly update the same conversation key with the text
-        // just sent; do not reopen an incoming alert immediately after Reply.
-        if (repliedKeys[id]?.let { it > now } == true) {
-            Diagnostics.record("Notif skipped: recent inline reply to package=${sbn.packageName}")
-            return@safe
+        repliedKeys.entries.removeAll { it.value.first < now }
+        // Only ignore a notification reflecting the user's actual sent text.
+        // A new incoming message in the same chat must still appear promptly.
+        val lastReply = repliedKeys[id]
+        if (lastReply != null && lastReply.first > now) {
+            val current = listOfNotNull(
+                n.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString(),
+                n.extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString(),
+                runCatching {
+                    (n.extras.getParcelableArray(Notification.EXTRA_MESSAGES)?.lastOrNull()
+                        as? Bundle)?.getCharSequence("text")?.toString()
+                }.getOrNull()
+            )
+            if (current.any { it.trim() == lastReply.second }) {
+                Diagnostics.record("Notif skipped: echoed outgoing reply package=${sbn.packageName}")
+                return@safe
+            }
         }
         if (n.flags and Notification.FLAG_GROUP_SUMMARY != 0 || n.visibility == Notification.VISIBILITY_SECRET) {
             Diagnostics.record("Notif ignored: summary or secret, package=${sbn.packageName}")
@@ -425,7 +436,7 @@ class IslandRuntime(val host: View) {
                     }
                     android.app.RemoteInput.addResultsToIntent(reply.inputs, fillIn, results)
                     reply.intent.send(context, 0, fillIn)
-                    repliedKeys[event.key] = SystemClock.elapsedRealtime() + 8000L
+                    repliedKeys[event.key] = (SystemClock.elapsedRealtime() + 6000L) to message
                     events.remove(event.key)
                     expanded = false
                     dialog.dismiss()
