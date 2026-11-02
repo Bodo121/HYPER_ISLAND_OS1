@@ -34,7 +34,7 @@ Android cannot safely reflow all apps' launcher content with a normal window ove
 ## Features intentionally not faked
 
 * **Inline quick reply** needs a secure, focusable text-input flow and a genuine `RemoteInput` action. The current implementation only offers the real notification content action.
-* **Dolby Atmos, Hi-Res 96kHz, Xiaomi Buds device selection, and charging 67W** are not rendered unless actual capability/data integrations exist. The uploaded design showed mock data.
+* **Dolby Atmos** and **67W maximum Turbo Charging** are officially documented hardware capabilities of Xiaomi 12 Lite. We now label them as *supported* only on `Build.DEVICE == "taoyao"`; these labels do **not** claim active Dolby processing or current charging wattage. Live Hi-Res 96kHz, Buds device selection, and exact active wattage remain unimplemented. The uploaded UI had mock telemetry.
 * **Battery decimal percentages** are not exposed by regular battery broadcasts and are not fabricated.
 * **Native HyperOS blur** and modifications to other applications' layouts require separate runtime capabilities and testing. A native gradient fallback is used.
 
