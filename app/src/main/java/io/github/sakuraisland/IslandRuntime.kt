@@ -78,7 +78,10 @@ class IslandRuntime(val host: View) {
                             expires = SystemClock.elapsedRealtime() + 6000,
                             kind = "charging"); redraw()
                     }
-                    if (!charging) events.remove("battery")
+                    if (!charging && wasCharging) {
+                        events.remove("battery")
+                        redraw()
+                    }
                     wasCharging = charging
                 }
             }
@@ -292,6 +295,11 @@ class IslandRuntime(val host: View) {
     }
     private fun animateSize(w: Int, h: Int) {
         animator?.cancel()
+        if (!enabled("motion")) {
+            params.width = w; params.height = h
+            if (attached) window.updateViewLayout(panel, params)
+            return
+        }
         if (params.width == w && params.height == h) { window.updateViewLayout(panel, params); return }
         val fromW = params.width; val fromH = params.height
         animator = ValueAnimator.ofFloat(0f, 1f).apply {
