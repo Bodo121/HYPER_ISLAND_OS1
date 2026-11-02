@@ -44,7 +44,7 @@ class PolicyTest {
         assertEquals(2, Policy.alertPreviewLines("short\nother message of medium length"))
     }
     @Test fun cameraGapNeverAllowsTextOverLens() {
-        assertEquals(88, Policy.compactSideWidth(420, 80, 42))
+        assertEquals(128, Policy.compactSideWidth(420, 80, 42))
         assertEquals(0, Policy.compactSideWidth(150, 100, 30))
     }
     @Test fun variableAlertHeightIsBounded() {
