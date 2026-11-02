@@ -297,11 +297,18 @@ internal class IslandVisuals(private val context: Context, private val panel: Li
                 contentDescription=title+" notification"
                 setOnClickListener { click() }
             }
-            actions.addView(chip, LinearLayout.LayoutParams(dp(if(primary) 75 else 66),dp(34)).apply {
-                marginStart=dp(7)
+            val width = if(title.length > 9) 94 else if(primary) 74 else 65
+            actions.addView(chip, LinearLayout.LayoutParams(dp(width),dp(34)).apply {
+                marginStart=dp(6)
             })
         }
-        if(e.intent != null) actionChip("Open", true) { action("open") }
+        // Preserve the most useful safe one-tap native action (e.g. Xiaomi's
+        // "Stop" charging boost). RemoteInput actions remain in the shade;
+        // do not fabricate a reply composer inside a non-focusable window.
+        e.actions.firstOrNull()?.let { native ->
+            actionChip(native.title, true) { action("notification_action_0") }
+        }
+        if(e.intent != null) actionChip("Open", e.actions.isEmpty()) { action("open") }
         actionChip("Close",false) { action("collapse") }
         panel.addView(actions,LinearLayout.LayoutParams(-1,dp(36)).apply { topMargin=dp(11) })
     }
