@@ -152,25 +152,62 @@ class IslandRuntime(val host: View) {
         }
         redraw()
     }
+    private val recentDelivery = LinkedHashMap<String, Long>()
+    /** Called from native SystemUI's incoming notification stream; never leaks alert text to logs. */
     fun posted(sbn: StatusBarNotification) { safe {
-        if (!enabled("enabled") || sbn.user != UserHandle.getUserHandleForUid(Process.myUid())) return@safe
+        val now = SystemClock.elapsedRealtime()
+        if (!enabled("enabled") || !enabled("notifications") && sbn.notification.category != Notification.CATEGORY_CALL
+            && sbn.notification.category != Notification.CATEGORY_ALARM) return@safe
+        if (sbn.user != UserHandle.getUserHandleForUid(Process.myUid()) &&
+            sbn.user != UserHandle.ALL) {
+            Diagnostics.record("Notif ignored: different Android user (package=${sbn.packageName})")
+            return@safe
+        }
+        if (sbn.packageName == "com.android.systemui") return@safe
+        val id = sbn.key
+        // NotifCollection and upstream coalescer may both deliver an update.
+        if ((recentDelivery[id] ?: 0L) > now - 280L) return@safe
+        recentDelivery[id] = now
+        if (recentDelivery.size > 64) {
+            val old = recentDelivery.keys.firstOrNull()
+            if (old != null) recentDelivery.remove(old)
+        }
         val n = sbn.notification
-        if (n.flags and Notification.FLAG_GROUP_SUMMARY != 0 || n.visibility == Notification.VISIBILITY_SECRET) return@safe
+        if (n.flags and Notification.FLAG_GROUP_SUMMARY != 0 || n.visibility == Notification.VISIBILITY_SECRET) {
+            Diagnostics.record("Notif ignored: summary or secret, package=${sbn.packageName}")
+            return@safe
+        }
         val call = n.category == Notification.CATEGORY_CALL || n.category == Notification.CATEGORY_MISSED_CALL
         val timer = n.category == Notification.CATEGORY_ALARM || n.category == Notification.CATEGORY_STOPWATCH
-        val allowed = options["apps"].orEmpty().split(',').map { it.trim() }.contains(sbn.packageName)
-        if ((call && !enabled("calls")) || (timer && !enabled("timers")) || (!call && !timer && (!enabled("notifications") || !allowed))) return@safe
-        val now = SystemClock.elapsedRealtime()
-        events[sbn.key] = IslandEvent(sbn.key, n.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.take(120) ?: sbn.packageName,
-            n.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.take(300) ?: "Notification",
-            if (call) 100 else if (timer) 80 else 60, now, now + if (call || timer) 30000 else 8000,
+        if (n.category == Notification.CATEGORY_TRANSPORT) return@safe
+        if (!call && !timer && n.flags and Notification.FLAG_FOREGROUND_SERVICE != 0) return@safe
+        val allowed = enabled("all_apps") || options["apps"].orEmpty().split(',').map { it.trim() }
+            .contains(sbn.packageName)
+        if ((call && !enabled("calls")) || (timer && !enabled("timers")) ||
+            (!call && !timer && (!enabled("notifications") || !allowed))) {
+            Diagnostics.record("Notif filtered by settings: ${sbn.packageName}")
+            return@safe
+        }
+        val heading = n.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.take(120)
+            ?.takeUnless { it.isBlank() } ?: sbn.packageName
+        val preview = n.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()
+            ?: n.extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
+            ?: "Open notification"
+        // No raw message content is recorded in diagnostics.
+        events[id] = IslandEvent(id, heading, preview.take(300), if (call) 100 else if (timer) 80 else 65,
+            now, now + if (call || timer) 30000 else 8500,
             n.contentIntent, dismissible = sbn.isClearable && !call && !timer,
             kind = if (call) "call" else if (timer) "timer" else "notification",
             appIcon = runCatching { n.smallIcon?.loadDrawable(context) }.getOrNull())
         while (events.size > 32) events.remove(events.keys.firstOrNull { it != "media" } ?: break)
+        Diagnostics.record("Notif accepted: package=${sbn.packageName} type=${if(call) "call" else if(timer) "timer" else "alert"} eligible=${eligible()}")
         redraw()
     } }
-    fun removed(key: String) { safe { events.remove(key); redraw() } }
+    fun removed(key: String) { safe {
+        recentDelivery.remove(key)
+        events.remove(key)
+        redraw()
+    } }
     private fun eligible() = enabled("enabled") && power.isInteractive && !keyguard.isKeyguardLocked &&
         host.isAttachedToWindow && host.isShown && context.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT
     private fun redraw() {
@@ -253,22 +290,10 @@ class IslandRuntime(val host: View) {
                     } else hide()
                 }
             }
-            var downX = 0f
-            panel.setOnTouchListener { v, motion ->
-                when(motion.actionMasked) {
-                    MotionEvent.ACTION_DOWN -> { downX = motion.x; true }
-                    MotionEvent.ACTION_UP -> {
-                        safe {
-                            if (kotlin.math.abs(motion.x-downX)>dp(48) && event.dismissible) {
-                                events.remove(event.key); expanded = false; redraw()
-                            } else v.performClick()
-                        }
-                        true
-                    }
-                    MotionEvent.ACTION_CANCEL -> true
-                    else -> true
-                }
-            }
+            // Do not swallow ACTION_DOWN on the root panel: doing so prevents
+            // descendants (transport controls and scrubbing) from getting touches.
+            // The parent click handler expands/collapses only on empty content.
+            panel.setOnTouchListener(null)
             if (expanded && event.media != null) main.postDelayed(progressTick,1000L)
         }
 
