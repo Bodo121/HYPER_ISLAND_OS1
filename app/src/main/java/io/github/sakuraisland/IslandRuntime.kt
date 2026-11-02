@@ -16,11 +16,14 @@ import android.view.animation.DecelerateInterpolator
 import android.widget.*
 import android.animation.ValueAnimator
 
+data class IslandAction(val title: String, val intent: PendingIntent)
+
 data class IslandEvent(val key: String, val title: String, val text: String, val priority: Int,
     val time: Long = SystemClock.elapsedRealtime(), val expires: Long = Long.MAX_VALUE,
     val intent: PendingIntent? = null, val art: Bitmap? = null, val media: MediaController? = null,
     val dismissible: Boolean = true, val kind: String = "notification",
-    val appIcon: android.graphics.drawable.Drawable? = null)
+    val appIcon: android.graphics.drawable.Drawable? = null,
+    val actions: List<IslandAction> = emptyList())
 
 class IslandRuntime(val host: View) {
     private val context = host.context
@@ -198,13 +201,19 @@ class IslandRuntime(val host: View) {
             n.extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
         ).maxByOrNull { it.length }?.trim()?.takeUnless { it.isBlank() }
             ?: "Open notification"
+        // Action PendingIntents are kept in memory only; never serialized/logged.
+        val actions = n.actions?.asSequence()?.filter {
+            it.actionIntent != null && it.remoteInputs.isNullOrEmpty()
+        }?.take(2)?.map {
+            IslandAction(it.title?.toString()?.take(32) ?: "Action", it.actionIntent)
+        }?.toList().orEmpty()
         // No raw message content is recorded in diagnostics.
         events[id] = IslandEvent(id, heading, preview.take(750), if (call) 100 else if (timer) 80 else 65,
             now, now + if (call || timer) 30000 else 8500,
             n.contentIntent, dismissible = sbn.isClearable && !call && !timer,
             kind = if (call) "call" else if (timer) "timer" else "notification",
             appIcon = runCatching { context.packageManager.getApplicationIcon(sbn.packageName) }.getOrNull()
-                ?: runCatching { n.smallIcon?.loadDrawable(context) }.getOrNull())
+                ?: runCatching { n.smallIcon?.loadDrawable(context) }.getOrNull(), actions = actions)
         while (events.size > 32) events.remove(events.keys.firstOrNull { it != "media" } ?: break)
         if (enabled("auto_expand_notifications") && !call && !timer) autoExpandKey = id
         Diagnostics.record("Notif accepted: package=${sbn.packageName} type=${if(call) "call" else if(timer) "timer" else "alert"} eligible=${eligible()}")
@@ -239,7 +248,10 @@ class IslandRuntime(val host: View) {
             n.category == Notification.CATEGORY_SYSTEM ||
             n.visibility == Notification.VISIBILITY_SECRET ||
             n.flags and (Notification.FLAG_ONGOING_EVENT or Notification.FLAG_FOREGROUND_SERVICE or Notification.FLAG_GROUP_SUMMARY) != 0 ||
-            !sbn.isClearable || n.contentIntent == null) return false
+            !sbn.isClearable ||
+            (n.contentIntent == null && n.actions?.none {
+                it.actionIntent != null && it.remoteInputs.isNullOrEmpty()
+            } != false)) return false
         // If the collection listener hasn't posted yet, handle it now.
         // Never suppress unless a real island event actually wins priority
         // and an island view is attached to the visible SystemUI host.
@@ -352,6 +364,11 @@ class IslandRuntime(val host: View) {
                         }
                         "open" -> {
                             event.intent?.send()
+                            expanded = false; redraw()
+                        }
+                        "notification_action_0" -> {
+                            event.actions.firstOrNull()?.intent?.send()
+                            events.remove(event.key)
                             expanded = false; redraw()
                         }
                         "collapse" -> { expanded = false; redraw() }
