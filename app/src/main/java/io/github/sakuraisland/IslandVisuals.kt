@@ -133,14 +133,26 @@ internal class IslandVisuals(private val context: Context, private val panel: Li
         durationMs = e.media?.metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION)?.coerceAtLeast(0L) ?: 0L
         mediaProgress = null; timeLabel = null; durationLabel = null; dragging = false
         panel.removeAllViews()
-        panel.setPadding(dp(if (expanded) 16 else 10),
-            if (expanded) maxOf(topClearancePx, dp(47)) else dp(2),
-            dp(if (expanded) 16 else 10), dp(if (expanded) 12 else 3))
+        panel.setPadding(dp(if (expanded) 15 else 10),
+            if (expanded) maxOf(topClearancePx, dp(if(e.kind=="notification") 37 else 43)) else dp(2),
+            dp(if (expanded) 15 else 10), dp(if (expanded) 9 else 3))
         panel.gravity = if (expanded) Gravity.TOP else Gravity.CENTER_VERTICAL
         panel.clipToOutline = false
-        val accent = if(e.kind == "charging") Color.rgb(0,230,118)
-            else if(chroma) artColor(e.art) else sakura
+        val accent = when(e.kind) {
+            "charging" -> Color.rgb(0,230,118)
+            "notification" -> {
+                val iconBitmap = (e.appIcon as? android.graphics.drawable.BitmapDrawable)?.bitmap
+                if (chroma && iconBitmap != null) artColor(iconBitmap) else Color.rgb(113,92,128)
+            }
+            else -> if(chroma) artColor(e.art) else sakura
+        }
         panel.background = IslandShape(expanded, cameraCapPx, compactHeightPx.coerceAtLeast(dp(34)), accent, dp(28), dp(22))
+
+        if (expanded && e.kind == "notification") {
+            renderAlert(e, accent, action)
+            panel.contentDescription = "${e.title}, notification preview. Open notification to read full message."
+            return
+        }
 
         if (!expanded) {
             val row = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
@@ -243,6 +255,55 @@ internal class IslandVisuals(private val context: Context, private val panel: Li
             panel.addView(controls,LinearLayout.LayoutParams(-1,dp(48)).apply { topMargin = dp(7) })
         }
         panel.contentDescription = "${e.title}, ${e.text}. ${if(expanded) "Expanded" else "Tap to expand"}."
+    }
+
+    /** Compact notification card: full multi-line preview, no media timeline or empty playback area. */
+    private fun renderAlert(e: IslandEvent, accent: Int, action: (String) -> Unit) {
+        val eyebrow = text("NEW NOTIFICATION", 10f, mix(accent,white,.50f), true).apply {
+            letterSpacing = .12f
+        }
+        panel.addView(eyebrow, LinearLayout.LayoutParams(-1,dp(16)))
+        val row = LinearLayout(context).apply { gravity = Gravity.TOP }
+        row.addView(image(e,44,12),LinearLayout.LayoutParams(dp(44),dp(44)))
+        val content = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.TOP
+        }
+        val sender = text(e.title,14.5f,white,true).apply {
+            maxLines = 1; ellipsize = TextUtils.TruncateAt.END
+        }
+        content.addView(sender,LinearLayout.LayoutParams(-1,dp(22)))
+        val preview = text(e.text,12.7f,secondary).apply {
+            maxLines = 4
+            ellipsize = TextUtils.TruncateAt.END
+            gravity = Gravity.TOP
+            setLineSpacing(dp(2).toFloat(),1f)
+        }
+        content.addView(preview,LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(2) })
+        row.addView(content,LinearLayout.LayoutParams(0,-2,1f).apply { marginStart=dp(12) })
+        panel.addView(row,LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(9) })
+        val actions = LinearLayout(context).apply {
+            gravity = Gravity.CENTER_VERTICAL or Gravity.END
+        }
+        fun actionChip(title:String, primary:Boolean, click:()->Unit) {
+            val chip = TextView(context).apply {
+                text=title
+                textSize=12.5f
+                setTextColor(if(primary) white else secondary)
+                setTypeface(typeface,android.graphics.Typeface.BOLD)
+                gravity=Gravity.CENTER
+                background=rounded(if(primary) mix(accent,Color.BLACK,.70f) else Color.rgb(35,32,40),17)
+                isClickable=true; isFocusable=true
+                contentDescription=title+" notification"
+                setOnClickListener { click() }
+            }
+            actions.addView(chip, LinearLayout.LayoutParams(dp(if(primary) 75 else 66),dp(34)).apply {
+                marginStart=dp(7)
+            })
+        }
+        if(e.intent != null) actionChip("Open", true) { action("open") }
+        actionChip("Close",false) { action("collapse") }
+        panel.addView(actions,LinearLayout.LayoutParams(-1,dp(36)).apply { topMargin=dp(11) })
     }
 
     private fun control(row: LinearLayout, icon: Int, desc: String, primary: Boolean, click: () -> Unit) {
