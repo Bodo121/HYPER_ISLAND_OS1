@@ -17,6 +17,7 @@ import android.widget.*
 import android.animation.ValueAnimator
 
 data class IslandAction(val title: String, val intent: PendingIntent)
+data class IslandReply(val intent: PendingIntent, val inputs: Array<android.app.RemoteInput>)
 
 data class IslandEvent(val key: String, val title: String, val text: String, val priority: Int,
     val time: Long = SystemClock.elapsedRealtime(), val expires: Long = Long.MAX_VALUE,
@@ -24,7 +25,7 @@ data class IslandEvent(val key: String, val title: String, val text: String, val
     val dismissible: Boolean = true, val kind: String = "notification",
     val appIcon: android.graphics.drawable.Drawable? = null,
     val actions: List<IslandAction> = emptyList(), val appLabel: String? = null,
-    val chargingBoost: Boolean = false)
+    val chargingBoost: Boolean = false, val reply: IslandReply? = null)
 
 class IslandRuntime(val host: View) {
     private val context = host.context
@@ -53,6 +54,8 @@ class IslandRuntime(val host: View) {
     private var errors = 0
     private var currentKey: String? = null
     private var autoExpandKey: String? = null
+    private val repliedKeys = mutableMapOf<String, Long>()
+    private var replyDialog: AlertDialog? = null
     private var selectedNotificationKey: String? = null
     private var animator: ValueAnimator? = null
     private val hiddenIcons = linkedMapOf<View, Float>()
@@ -198,6 +201,13 @@ class IslandRuntime(val host: View) {
             if (old != null) recentDelivery.remove(old)
         }
         val n = sbn.notification
+        repliedKeys.entries.removeAll { it.value < now }
+        // Local apps commonly update the same conversation key with the text
+        // just sent; do not reopen an incoming alert immediately after Reply.
+        if (repliedKeys[id]?.let { it > now } == true) {
+            Diagnostics.record("Notif skipped: recent inline reply to package=${sbn.packageName}")
+            return@safe
+        }
         if (n.flags and Notification.FLAG_GROUP_SUMMARY != 0 || n.visibility == Notification.VISIBILITY_SECRET) {
             Diagnostics.record("Notif ignored: summary or secret, package=${sbn.packageName}")
             Diagnostics.publish(context)
@@ -238,6 +248,13 @@ class IslandRuntime(val host: View) {
         }?.take(2)?.map {
             IslandAction(it.title?.toString()?.take(32) ?: "Action", it.actionIntent)
         }?.toList().orEmpty()
+        val reply = n.actions?.firstOrNull { a ->
+            a.actionIntent != null &&
+                a.remoteInputs?.any { it.allowFreeFormInput && !it.resultKey.isNullOrBlank() } == true
+        }?.let { a ->
+            val inputs = a.remoteInputs?.filter { it.allowFreeFormInput && !it.resultKey.isNullOrBlank() }?.toTypedArray()
+            if (inputs.isNullOrEmpty()) null else IslandReply(a.actionIntent, inputs)
+        }
         // No raw message content is recorded in diagnostics.
         events[id] = IslandEvent(id, heading, preview.take(750), if (call) 100 else if (boost) 92 else if (timer) 80 else 65,
             now, now + if (call || timer) 30000 else 8500,
@@ -248,7 +265,7 @@ class IslandRuntime(val host: View) {
             appLabel = runCatching {
                 context.packageManager.getApplicationLabel(
                     context.packageManager.getApplicationInfo(sbn.packageName, 0)).toString().take(30)
-            }.getOrNull(), chargingBoost = boost)
+            }.getOrNull(), chargingBoost = boost, reply = reply)
         while (events.size > 32) events.remove(events.keys.firstOrNull { it != "media" } ?: break)
         if (enabled("auto_expand_notifications") && !call && !timer) autoExpandKey = id
         selectedNotificationKey = null
@@ -258,6 +275,7 @@ class IslandRuntime(val host: View) {
     } }
     fun removed(key: String) { safe {
         recentDelivery.remove(key)
+        repliedKeys.remove(key)
         events.remove(key)
         if (selectedNotificationKey == key) selectedNotificationKey = null
         redraw()
@@ -295,7 +313,7 @@ class IslandRuntime(val host: View) {
             n.flags and Notification.FLAG_GROUP_SUMMARY != 0 ||
             ((n.flags and (Notification.FLAG_ONGOING_EVENT or Notification.FLAG_FOREGROUND_SERVICE) != 0 ||
                 !sbn.isClearable) && !boostedCharging) ||
-            (n.contentIntent == null && !hasSimpleAction)) return false
+            (n.contentIntent == null && !hasSimpleAction && n.actions?.none { it.remoteInputs?.isNotEmpty() == true } != false)) return false
         // If the collection listener hasn't posted yet, handle it now.
         // Never suppress unless a real island event actually wins priority
         // and an island view is attached to the visible SystemUI host.
@@ -367,6 +385,67 @@ class IslandRuntime(val host: View) {
             Diagnostics.publish(context)
         }
         return replaced
+    }
+
+    /** Focusable SystemUI-owned prompt; never inject text into the non-focusable island window. */
+    private fun openReplyDialog(event: IslandEvent, reply: IslandReply) {
+        if (!eligible() || replyDialog?.isShowing == true) return
+        val field = EditText(context).apply {
+            hint = "Type a reply"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or
+                android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            minLines = 1; maxLines = 4
+            setPadding(dp(18),dp(12),dp(18),dp(12))
+        }
+        val container = FrameLayout(context).apply {
+            setPadding(dp(12),dp(8),dp(12),dp(8))
+            addView(field, FrameLayout.LayoutParams(-1,-2))
+        }
+        val dialog = AlertDialog.Builder(context)
+            .setTitle("Reply · ${event.appLabel ?: event.title}")
+            .setView(container)
+            .setNegativeButton("Cancel",null)
+            .setPositiveButton("Send",null)
+            .create()
+        // SystemUI is privileged to present this trusted overlay.
+        dialog.window?.setType(2017)
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val message = field.text.toString().trim()
+                if(message.isEmpty()) {
+                    field.error = "Write a message"
+                    return@setOnClickListener
+                }
+                try {
+                    val results = Bundle()
+                    reply.inputs.forEach { results.putCharSequence(it.resultKey,message) }
+                    val fillIn = Intent().apply {
+                        addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
+                    }
+                    android.app.RemoteInput.addResultsToIntent(reply.inputs, fillIn, results)
+                    reply.intent.send(context, 0, fillIn)
+                    repliedKeys[event.key] = SystemClock.elapsedRealtime() + 8000L
+                    events.remove(event.key)
+                    expanded = false
+                    dialog.dismiss()
+                    redraw()
+                    Diagnostics.record("Inline reply sent; package not logged, content never stored")
+                } catch (e: PendingIntent.CanceledException) {
+                    field.error = "Reply action expired; open the app"
+                } catch (e: Exception) {
+                    field.error = "Couldn't send; open the app"
+                }
+            }
+            field.requestFocus()
+            dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE)
+        }
+        dialog.setOnDismissListener { if(replyDialog === dialog) replyDialog = null }
+        replyDialog = dialog
+        try { dialog.show() } catch (t: Throwable) {
+            replyDialog = null
+            Diagnostics.record("Reply dialog unavailable: ${t.javaClass.simpleName}")
+        }
     }
 
     private fun eligible() = enabled("enabled") && power.isInteractive && !keyguard.isKeyguardLocked &&
@@ -475,6 +554,7 @@ class IslandRuntime(val host: View) {
                             event.intent?.send()
                             expanded = false; redraw()
                         }
+                        "reply" -> event.reply?.let { openReplyDialog(event, it) }
                         "notification_action_0", "notification_action_1" -> {
                             val index = if(which.endsWith("1")) 1 else 0
                             event.actions.getOrNull(index)?.intent?.send()
@@ -602,7 +682,7 @@ class IslandRuntime(val host: View) {
         if (attached) { try { window.removeViewImmediate(panel) } catch (_: Exception) { }; attached = false }
     }
     fun dispose() {
-        disposed = true; main.removeCallbacksAndMessages(null); hide(); media?.stop(); media = null
+        disposed = true; replyDialog?.dismiss(); replyDialog = null; main.removeCallbacksAndMessages(null); hide(); media?.stop(); media = null
         host.removeOnLayoutChangeListener(layoutListener)
         appIconCache.clear()
         try { context.unregisterReceiver(receiver) } catch (_: Exception) { }
