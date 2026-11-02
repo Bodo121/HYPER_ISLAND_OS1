@@ -37,6 +37,12 @@ class PolicyTest {
         assertFalse(Policy.allowNotificationPackage("com.google.android.apps.messaging", false, "com.whatsapp"))
         assertFalse(Policy.allowNotificationPackage("com.whatsapp", false, ""))
     }
+    @Test fun alertCardsGrowForLongerMessagesButStayBounded() {
+        assertEquals(1, Policy.alertPreviewLines("Hey"))
+        assertEquals(2, Policy.alertPreviewLines("A".repeat(45)))
+        assertEquals(4, Policy.alertPreviewLines("A".repeat(500)))
+        assertEquals(3, Policy.alertPreviewLines("short\\nother message of medium length"))
+    }
     @Test fun exactTargetOnly() {
         assertTrue(Policy.target(34, "taoyao", "OS1.0.39.0.ULIEUXM"))
         assertFalse(Policy.target(35, "taoyao", "OS1.0.39.0.ULIEUXM"))
