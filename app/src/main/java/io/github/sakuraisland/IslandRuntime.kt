@@ -301,49 +301,47 @@ class IslandRuntime(val host: View) {
      * Native notification records, sounds, vibrations, shade entries and
      * full-screen/call/alarm behavior remain untouched.
      */
+    /**
+     * Suppress only the duplicate standard heads-up *presentation*, never the
+     * Android notification record or its shade/sound/vibration. A strict
+     * SystemUI-host gate means the OEM UI remains the fallback if the island
+     * module is disabled, crashed, off-screen, or not attached.
+     */
     fun showInsteadOfHeadsUp(sbn: StatusBarNotification): Boolean {
-        if (disposed || failed || !enabled("enabled") ||
-            !enabled("notifications") || !enabled("replace_heads_up") ||
-            !enabled("auto_expand_notifications") ||
+        if (disposed || failed || !enabled("enabled") || !enabled("notifications") ||
+            !enabled("replace_heads_up") || !enabled("auto_expand_notifications") ||
             Looper.myLooper() != Looper.getMainLooper() || !eligible()) return false
         val n = sbn.notification
-        val hasSimpleAction = n.actions?.any {
-            it.actionIntent != null && it.remoteInputs.isNullOrEmpty()
-        } == true
+        val hasSimpleAction = n.actions?.any { it.actionIntent != null && it.remoteInputs.isNullOrEmpty() } == true
+        val hasReply = n.actions?.any { a -> a.remoteInputs?.isNotEmpty() == true } == true
         val title = n.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
-        // Xiaomi's "Stop boosting charging speed" is an actionable ongoing
-        // Security/PowerKeeper banner. Permit replacing *only this kind* of
-        // OEM banner after its real Stop action has been copied into the card.
-        val boostedCharging = Policy.isXiaomiChargeBoost(sbn.packageName, title, hasSimpleAction)
+        val boost = Policy.isXiaomiChargeBoost(sbn.packageName,title,hasSimpleAction)
         if (sbn.packageName == "com.android.systemui" || n.fullScreenIntent != null ||
-            n.category == Notification.CATEGORY_CALL ||
-            n.category == Notification.CATEGORY_MISSED_CALL ||
-            n.category == Notification.CATEGORY_ALARM ||
-            n.category == Notification.CATEGORY_REMINDER ||
-            n.category == Notification.CATEGORY_ERROR ||
-            (n.category == Notification.CATEGORY_SYSTEM && !boostedCharging) ||
+            n.category in listOf(Notification.CATEGORY_CALL, Notification.CATEGORY_MISSED_CALL,
+                Notification.CATEGORY_ALARM, Notification.CATEGORY_REMINDER, Notification.CATEGORY_ERROR) ||
+            (n.category == Notification.CATEGORY_SYSTEM && !boost) ||
             n.visibility == Notification.VISIBILITY_SECRET ||
             n.flags and Notification.FLAG_GROUP_SUMMARY != 0 ||
             ((n.flags and (Notification.FLAG_ONGOING_EVENT or Notification.FLAG_FOREGROUND_SERVICE) != 0 ||
-                !sbn.isClearable) && !boostedCharging) ||
-            (n.contentIntent == null && !hasSimpleAction && n.actions?.none { it.remoteInputs?.isNotEmpty() == true } != false)) return false
-        // If the collection listener hasn't posted yet, handle it now.
-        // Never suppress unless a real island event actually wins priority
-        // and an island view is attached to the visible SystemUI host.
-        // Re-apply even when the notification key already exists: WhatsApp and
-        // similar apps update one notification for multiple incoming messages.
-        // posted() deduplicates near-simultaneous callbacks safely.
-        posted(sbn)
-        val now = SystemClock.elapsedRealtime()
-        val candidate = events[sbn.key]
-        if (candidate?.kind != "notification" || candidate.expires <= now ||
-            !attached || !panel.isAttachedToWindow || currentKey != sbn.key || !expanded ||
-            !Policy.mayReplaceHeadsUp(candidate.kind, n.fullScreenIntent != null,
-                sbn.isClearable || boostedCharging, 
-                (n.flags and (Notification.FLAG_ONGOING_EVENT or Notification.FLAG_FOREGROUND_SERVICE) != 0) && !boostedCharging,
-                n.visibility == Notification.VISIBILITY_SECRET)) return false
-        Diagnostics.record("Replaced OEM heads-up visual: package=${sbn.packageName}")
-        Diagnostics.publish(context)
+                !sbn.isClearable) && !boost) ||
+            (n.contentIntent == null && !hasSimpleAction && !hasReply) ||
+            !Policy.allowNotificationPackage(sbn.packageName,enabled("all_apps"),options["apps"].orEmpty()))
+            return false
+        // The notification may be at the heads-up decision stage *before*
+        // the collection listener posts it. Create its island event now.
+        // Reentrancy is bounded by recentDelivery, and a failure never blocks OEM UI.
+        if (events[sbn.key]?.expires ?: 0L <= SystemClock.elapsedRealtime()) posted(sbn)
+        val candidate = events[sbn.key] ?: return false
+        if (candidate.kind != "notification" || candidate.expires <= SystemClock.elapsedRealtime() ||
+            !attached || !panel.isAttachedToWindow) return false
+        // Give new notifications an opportunity to expand, but don't depend
+        // on their animation finishing before the OEM HUN decision executes.
+        if (currentKey == sbn.key && !expanded) {
+            autoExpandKey = sbn.key
+            redraw()
+        }
+        if (currentKey != sbn.key) return false
+        Diagnostics.record("OEM heads-up visual suppressed: package=${sbn.packageName}")
         return true
     }
     /**
