@@ -276,6 +276,10 @@ fun SakuraSettingsScreen(
                     HorizontalDivider(color = Hairline, modifier = Modifier.padding(vertical = 8.dp))
                     ConfigToggle("Auto-expand new alerts", "Open the island briefly when an app message arrives",enabled("auto_expand_notifications")) { set("auto_expand_notifications",it.toString()) }
                     HorizontalDivider(color = Hairline, modifier = Modifier.padding(vertical = 8.dp))
+                    ConfigToggle("Replace Xiaomi pop-up banners",
+                        "Only hide standard visual heads-up banners after SakuraIsland displays the same alert. Calls, alarms, and full-screen alerts stay native.",
+                        enabled("replace_heads_up")) { set("replace_heads_up",it.toString()) }
+                    HorizontalDivider(color = Hairline, modifier = Modifier.padding(vertical = 8.dp))
                     OutlinedTextField(value = apps, onValueChange = { apps = it.take(1024) },
                         label = { Text("Package filter (used when All apps is off)") }, minLines = 2, maxLines = 4,
                         modifier = Modifier.fillMaxWidth(), textStyle = LocalTextStyle.current.copy(fontSize = 12.sp),
