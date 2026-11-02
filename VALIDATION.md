@@ -13,13 +13,18 @@
 
 Debug certificate SHA-256: `a1384515027ad95732d458f6eaf2fc397068b3b6f757d80c5c10d539a801eddc`.
 
+## Hosted CI
+
+GitHub Actions run https://github.com/Bodo121/HYPER_ISLAND_OS1/actions/runs/41473526403 completed successfully for commit `efde4765f4581c3e0454df805d143412996de6bc`. SDK setup, `assembleDebug testDebugUnitTest lintDebug`, APK upload and report upload all passed. The first run failed because the Android setup action requested the removed `tools` package; both workflows now explicitly request platform 35 and Build Tools 35.0.0.
+
+The hosted APK uses its own runner-generated debug certificate; it is not byte-identical to the locally delivered APK. Source archive integrity was checked against all 29 project files. `adb devices -l` returned no connected devices.
+
 ## Not executed / not established
 
 - No emulator install or visual UI test.
-- No phone connection, install, restart, firmware flashing or device modification.
+- No connected phone was available; no install, restart, firmware flashing or device modification.
 - No physical-device notification/media event test, LSPosed runtime recognition, SystemUI class-resolution result, cutout calibration or stability test.
 - No signed production release. The APK is a signed **debug experimental artifact**.
-- GitHub Actions execution is tracked separately in the repository; a local passing build is not a claim that hosted CI passed.
 
 ## Hardware acceptance checklist
 
@@ -35,3 +40,4 @@ Debug certificate SHA-256: `a1384515027ad95732d458f6eaf2fc397068b3b6f757d80c5c10
 10. Disabling via LSPosed and rebooting restores stock behavior.
 
 Only after these tests on OS1.0.39.0.ULIEUXM should device compatibility be reported.
+
