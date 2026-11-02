@@ -276,6 +276,8 @@ class IslandRuntime(val host: View) {
             params.width = width; params.height = height
             window.addView(panel, params); attached = true
             Diagnostics.record("Sakura island window attached")
+            // Read-only dimensions collected on the device, never hardcoded from APK mockups.
+            Diagnostics.record("Geometry displayWidthPx=$screenWidth density=${context.resources.displayMetrics.density} cutoutTop=${cutout?.flattenToString() ?: "none"} windowX=${params.x} windowY=${params.y} idle=${value("idle_width",72,132)}x${value("idle_height",28,44)}dp")
             Diagnostics.publish(context)
         } else animateSize(width, height)
         manageIcons()
