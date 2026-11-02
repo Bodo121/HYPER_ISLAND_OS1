@@ -72,12 +72,16 @@ private fun ConfigToggle(title: String, detail: String, checked: Boolean, onChec
 
 @Composable
 private fun ConfigSlider(title: String, current: Float, range: ClosedFloatingPointRange<Float>, unit: String, onSet: (Float) -> Unit) {
+    var value by remember(title) { mutableFloatStateOf(current) }
+    LaunchedEffect(current) { if (kotlin.math.abs(value - current) > 1.5f) value = current }
     Column(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(title, color = Paper, fontSize = 13.sp)
-            Text("${current.toInt()} $unit", color = Sakura, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Text("${value.toInt()} $unit", color = Sakura, fontSize = 12.sp, fontWeight = FontWeight.Bold)
         }
-        Slider(value = current.coerceIn(range.start, range.endInclusive), onValueChange = onSet, valueRange = range,
+        Slider(value = value.coerceIn(range.start, range.endInclusive),
+            onValueChange = { value = it },
+            onValueChangeFinished = { onSet(value) }, valueRange = range,
             colors = SliderDefaults.colors(thumbColor = Sakura, activeTrackColor = Sakura))
     }
 }
