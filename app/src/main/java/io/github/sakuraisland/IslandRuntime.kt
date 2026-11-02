@@ -16,10 +16,16 @@ import android.view.animation.DecelerateInterpolator
 import android.widget.*
 import android.animation.ValueAnimator
 
+data class IslandAction(val title: String, val intent: PendingIntent)
+data class IslandReply(val intent: PendingIntent, val inputs: Array<android.app.RemoteInput>)
+
 data class IslandEvent(val key: String, val title: String, val text: String, val priority: Int,
     val time: Long = SystemClock.elapsedRealtime(), val expires: Long = Long.MAX_VALUE,
     val intent: PendingIntent? = null, val art: Bitmap? = null, val media: MediaController? = null,
-    val dismissible: Boolean = true)
+    val dismissible: Boolean = true, val kind: String = "notification",
+    val appIcon: android.graphics.drawable.Drawable? = null,
+    val actions: List<IslandAction> = emptyList(), val appLabel: String? = null,
+    val chargingBoost: Boolean = false, val reply: IslandReply? = null)
 
 class IslandRuntime(val host: View) {
     private val context = host.context
@@ -29,12 +35,28 @@ class IslandRuntime(val host: View) {
     private val power = context.getSystemService(PowerManager::class.java)
     private var options = Config.defaults.toMap()
     private val events = linkedMapOf<String, IslandEvent>()
+    // Cache small launcher-icon ConstantStates, never store private notification text or Bitmaps.
+    private val appIconCache = object : LinkedHashMap<String, android.graphics.drawable.Drawable.ConstantState?>(20, .75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, android.graphics.drawable.Drawable.ConstantState?>) =
+            size > 20
+    }
+    private fun applicationIcon(packageName: String): android.graphics.drawable.Drawable? {
+        val cached = appIconCache[packageName]
+        if (cached != null) return cached.newDrawable(context.resources)
+        val icon = runCatching { context.packageManager.getApplicationIcon(packageName) }.getOrNull()
+        appIconCache[packageName] = icon?.constantState
+        return icon
+    }
     private var expanded = false
     private var attached = false
     private var disposed = false
     private var failed = false
     private var errors = 0
     private var currentKey: String? = null
+    private var autoExpandKey: String? = null
+    private val repliedKeys = mutableMapOf<String, Pair<Long, String>>()
+    private var replyDialog: AlertDialog? = null
+    private var selectedNotificationKey: String? = null
     private var animator: ValueAnimator? = null
     private val hiddenIcons = linkedMapOf<View, Float>()
     private val panel = LinearLayout(context).apply {
@@ -51,6 +73,15 @@ class IslandRuntime(val host: View) {
         title = "SakuraIsland (SystemUI)"
     }
     private var media: MediaSource? = null
+    private val visuals = IslandVisuals(context, panel)
+    private val progressTick = object : Runnable {
+        override fun run() {
+            if (attached && expanded && eligible()) {
+                safe { visuals.refreshProgress() }
+                main.postDelayed(this, 1000L)
+            }
+        }
+    }
     private val expiry = Runnable { safe { redraw() } }
     private val collapse = Runnable { safe { expanded = false; redraw() } }
     private val observer = object : ContentObserver(main) { override fun onChange(selfChange: Boolean) { loadConfig() } }
@@ -58,14 +89,23 @@ class IslandRuntime(val host: View) {
         override fun onReceive(c: Context, i: Intent) { safe {
             when (i.action) {
                 Intent.ACTION_SCREEN_OFF -> { expanded = false; hide() }
-                Intent.ACTION_USER_PRESENT, Intent.ACTION_CONFIGURATION_CHANGED -> { expanded = false; redraw() }
+                Intent.ACTION_USER_PRESENT, Intent.ACTION_CONFIGURATION_CHANGED, Intent.ACTION_SCREEN_ON -> { expanded = false; redraw() }
                 Intent.ACTION_BATTERY_CHANGED -> {
                     val charging = i.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0
                     val level = i.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
                     val scale = i.getIntExtra(BatteryManager.EXTRA_SCALE, 100).coerceAtLeast(1)
+                    lastBatteryLevel = if(level in 0..scale) level * 100 / scale else -1
                     if (enabled("charging") && charging && !wasCharging) {
-                        events["battery"] = IslandEvent("battery", "Charging", "${level * 100 / scale}% battery", 20,
-                            expires = SystemClock.elapsedRealtime() + 6000); redraw()
+                        val batteryLabel = if(level in 0..scale) "${level * 100 / scale}% battery" else "Charging connected"
+                        events["battery"] = IslandEvent("battery", "Charging", batteryLabel, 85,
+                            expires = SystemClock.elapsedRealtime() + 6000,
+                            kind = "charging")
+                        if (enabled("charging_expand")) autoExpandKey = "battery"
+                        redraw()
+                    }
+                    if (!charging && wasCharging) {
+                        events.remove("battery")
+                        redraw()
                     }
                     wasCharging = charging
                 }
@@ -73,6 +113,7 @@ class IslandRuntime(val host: View) {
         } }
     }
     private var wasCharging = false
+    private var lastBatteryLevel = -1
     private fun dp(v: Int) = (v * context.resources.displayMetrics.density).toInt()
     private fun enabled(k: String) = options[k] == "true"
     private fun value(k: String, min: Int, max: Int) = (options[k]?.toIntOrNull() ?: Config.defaults[k]!!.toInt()).coerceIn(min, max)
@@ -94,11 +135,16 @@ class IslandRuntime(val host: View) {
         context.registerReceiver(receiver, IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_OFF); addAction(Intent.ACTION_USER_PRESENT)
             addAction(Intent.ACTION_CONFIGURATION_CHANGED); addAction(Intent.ACTION_BATTERY_CHANGED)
+            addAction(Intent.ACTION_SCREEN_ON)
         }, Context.RECEIVER_NOT_EXPORTED)
         host.addOnLayoutChangeListener(layoutListener)
         loadConfig()
     }
-    private val layoutListener = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> safe { redraw() } }
+    private val relayout = Runnable { safe { redraw() } }
+    private val layoutListener = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+        main.removeCallbacks(relayout)
+        main.postDelayed(relayout, 48L)
+    }
     private fun loadConfig() { Diagnostics.io.execute {
         val next = Config.defaults.toMutableMap()
         try {
@@ -132,237 +178,502 @@ class IslandRuntime(val host: View) {
                 m?.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: c.packageName, 40,
                 expires = if (playing) Long.MAX_VALUE else SystemClock.elapsedRealtime() + 15000,
                 intent = c.sessionActivity, art = m?.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
-                    ?: m?.getBitmap(MediaMetadata.METADATA_KEY_ART), media = c)
+                    ?: m?.getBitmap(MediaMetadata.METADATA_KEY_ART), media = c, kind = "media")
         }
         redraw()
     }
+    private val recentDelivery = LinkedHashMap<String, Long>()
+    /** Called from native SystemUI's incoming notification stream; never leaks alert text to logs. */
     fun posted(sbn: StatusBarNotification) { safe {
-        if (!enabled("enabled") || sbn.user != UserHandle.getUserHandleForUid(Process.myUid())) return@safe
+        val now = SystemClock.elapsedRealtime()
+        if (!enabled("enabled")) return@safe
+        if (sbn.user != UserHandle.getUserHandleForUid(Process.myUid())) {
+            Diagnostics.record("Notif ignored: different Android user (package=${sbn.packageName})")
+            return@safe
+        }
+        if (sbn.packageName == "com.android.systemui") return@safe
+        val id = sbn.key
+        // NotifCollection and upstream coalescer may both deliver an update.
+        if ((recentDelivery[id] ?: 0L) > now - 280L) return@safe
+        recentDelivery[id] = now
+        if (recentDelivery.size > 64) {
+            val old = recentDelivery.keys.firstOrNull()
+            if (old != null) recentDelivery.remove(old)
+        }
         val n = sbn.notification
-        if (n.flags and Notification.FLAG_GROUP_SUMMARY != 0 || n.visibility == Notification.VISIBILITY_SECRET) return@safe
+        repliedKeys.entries.removeAll { it.value.first < now }
+        // Only ignore a notification reflecting the user's actual sent text.
+        // A new incoming message in the same chat must still appear promptly.
+        val lastReply = repliedKeys[id]
+        if (lastReply != null && lastReply.first > now) {
+            val current = listOfNotNull(
+                n.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString(),
+                n.extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString(),
+                runCatching {
+                    (n.extras.getParcelableArray(Notification.EXTRA_MESSAGES)?.lastOrNull()
+                        as? Bundle)?.getCharSequence("text")?.toString()
+                }.getOrNull()
+            )
+            if (current.any { it.trim() == lastReply.second }) {
+                Diagnostics.record("Notif skipped: echoed outgoing reply package=${sbn.packageName}")
+                return@safe
+            }
+        }
+        if (n.flags and Notification.FLAG_GROUP_SUMMARY != 0 || n.visibility == Notification.VISIBILITY_SECRET) {
+            Diagnostics.record("Notif ignored: summary or secret, package=${sbn.packageName}")
+            Diagnostics.publish(context)
+            return@safe
+        }
         val call = n.category == Notification.CATEGORY_CALL || n.category == Notification.CATEGORY_MISSED_CALL
         val timer = n.category == Notification.CATEGORY_ALARM || n.category == Notification.CATEGORY_STOPWATCH
-        val allowed = options["apps"].orEmpty().split(',').map { it.trim() }.contains(sbn.packageName)
-        if ((call && !enabled("calls")) || (timer && !enabled("timers")) || (!call && !timer && (!enabled("notifications") || !allowed))) return@safe
-        val now = SystemClock.elapsedRealtime()
-        events[sbn.key] = IslandEvent(sbn.key, n.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.take(120) ?: sbn.packageName,
-            n.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.take(300) ?: "Notification",
-            if (call) 100 else if (timer) 80 else 60, now, now + if (call || timer) 30000 else 8000,
-            n.contentIntent, dismissible = sbn.isClearable && !call && !timer)
+        val boost = Policy.isXiaomiChargeBoost(sbn.packageName,
+            n.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty(),
+            n.actions?.any { it.actionIntent != null && it.remoteInputs.isNullOrEmpty() } == true)
+        if (n.category == Notification.CATEGORY_TRANSPORT) return@safe
+        if (!call && !timer && !boost && n.flags and Notification.FLAG_FOREGROUND_SERVICE != 0) return@safe
+        val allowed = Policy.allowNotificationPackage(sbn.packageName, enabled("all_apps"),
+            options["apps"].orEmpty())
+        if ((call && !enabled("calls")) || (timer && !enabled("timers")) ||
+            (!call && !timer && (!enabled("notifications") || !allowed))) {
+            Diagnostics.record("Notif filtered by settings: ${sbn.packageName}")
+            Diagnostics.publish(context)
+            return@safe
+        }
+        val heading = n.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.take(120)
+            ?.takeUnless { it.isBlank() } ?: sbn.packageName
+        // A number of apps publish a short ticker in EXTRA_TEXT and a full
+        // preview in EXTRA_BIG_TEXT. Prefer the longest permitted public text.
+        val lastChatText = runCatching {
+            (n.extras.getParcelableArray(Notification.EXTRA_MESSAGES)?.lastOrNull()
+                as? Bundle)?.getCharSequence("text")?.toString()
+        }.getOrNull()
+        val preview = (lastChatText?.takeUnless { it.isBlank() }
+            ?: listOfNotNull(
+                n.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString(),
+                n.extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
+            ).maxByOrNull { it.length })?.trim()?.takeUnless { it.isBlank() }
+            ?: "Open notification"
+        // Action PendingIntents are kept in memory only; never serialized/logged.
+        val actions = n.actions?.asSequence()?.filter {
+            it.actionIntent != null && it.remoteInputs.isNullOrEmpty()
+        }?.take(2)?.map {
+            IslandAction(it.title?.toString()?.take(32) ?: "Action", it.actionIntent)
+        }?.toList().orEmpty()
+        val reply = n.actions?.firstOrNull { a ->
+            a.actionIntent != null &&
+                a.remoteInputs?.any { it.allowFreeFormInput && !it.resultKey.isNullOrBlank() } == true
+        }?.let { a ->
+            val inputs = a.remoteInputs?.filter { it.allowFreeFormInput && !it.resultKey.isNullOrBlank() }?.toTypedArray()
+            if (inputs.isNullOrEmpty()) null else IslandReply(a.actionIntent, inputs)
+        }
+        // No raw message content is recorded in diagnostics.
+        events[id] = IslandEvent(id, heading, preview.take(750), if (call) 100 else if (boost) 92 else if (timer) 80 else 65,
+            now, now + if (call || timer) 30000 else 8500,
+            n.contentIntent, dismissible = sbn.isClearable && !call && !timer,
+            kind = if (call) "call" else if (timer) "timer" else "notification",
+            appIcon = applicationIcon(sbn.packageName)
+                ?: runCatching { n.smallIcon?.loadDrawable(context) }.getOrNull(), actions = actions,
+            appLabel = runCatching {
+                context.packageManager.getApplicationLabel(
+                    context.packageManager.getApplicationInfo(sbn.packageName, 0)).toString().take(30)
+            }.getOrNull(), chargingBoost = boost, reply = reply)
         while (events.size > 32) events.remove(events.keys.firstOrNull { it != "media" } ?: break)
+        if (enabled("auto_expand_notifications") && !call && !timer) autoExpandKey = id
+        selectedNotificationKey = null
+        Diagnostics.record("Notif accepted: package=${sbn.packageName} type=${if(call) "call" else if(timer) "timer" else "alert"} eligible=${eligible()}")
+        Diagnostics.publish(context)
         redraw()
     } }
-    fun removed(key: String) { safe { events.remove(key); redraw() } }
+    fun removed(key: String) { safe {
+        recentDelivery.remove(key)
+        repliedKeys.remove(key)
+        events.remove(key)
+        if (selectedNotificationKey == key) selectedNotificationKey = null
+        redraw()
+    } }
+
+    /**
+     * Called synchronously from the privileged SystemUI heads-up renderer.
+     * Skip the OEM *visual banner only* when this exact standard notification
+     * has already been rendered as a visible expanded SakuraIsland card.
+     * Native notification records, sounds, vibrations, shade entries and
+     * full-screen/call/alarm behavior remain untouched.
+     */
+    fun showInsteadOfHeadsUp(sbn: StatusBarNotification): Boolean {
+        if (disposed || failed || !enabled("enabled") ||
+            !enabled("notifications") || !enabled("replace_heads_up") ||
+            !enabled("auto_expand_notifications") ||
+            Looper.myLooper() != Looper.getMainLooper() || !eligible()) return false
+        val n = sbn.notification
+        val hasSimpleAction = n.actions?.any {
+            it.actionIntent != null && it.remoteInputs.isNullOrEmpty()
+        } == true
+        val title = n.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
+        // Xiaomi's "Stop boosting charging speed" is an actionable ongoing
+        // Security/PowerKeeper banner. Permit replacing *only this kind* of
+        // OEM banner after its real Stop action has been copied into the card.
+        val boostedCharging = Policy.isXiaomiChargeBoost(sbn.packageName, title, hasSimpleAction)
+        if (sbn.packageName == "com.android.systemui" || n.fullScreenIntent != null ||
+            n.category == Notification.CATEGORY_CALL ||
+            n.category == Notification.CATEGORY_MISSED_CALL ||
+            n.category == Notification.CATEGORY_ALARM ||
+            n.category == Notification.CATEGORY_REMINDER ||
+            n.category == Notification.CATEGORY_ERROR ||
+            (n.category == Notification.CATEGORY_SYSTEM && !boostedCharging) ||
+            n.visibility == Notification.VISIBILITY_SECRET ||
+            n.flags and Notification.FLAG_GROUP_SUMMARY != 0 ||
+            ((n.flags and (Notification.FLAG_ONGOING_EVENT or Notification.FLAG_FOREGROUND_SERVICE) != 0 ||
+                !sbn.isClearable) && !boostedCharging) ||
+            (n.contentIntent == null && !hasSimpleAction && n.actions?.none { it.remoteInputs?.isNotEmpty() == true } != false)) return false
+        // If the collection listener hasn't posted yet, handle it now.
+        // Never suppress unless a real island event actually wins priority
+        // and an island view is attached to the visible SystemUI host.
+        // Re-apply even when the notification key already exists: WhatsApp and
+        // similar apps update one notification for multiple incoming messages.
+        // posted() deduplicates near-simultaneous callbacks safely.
+        posted(sbn)
+        val now = SystemClock.elapsedRealtime()
+        val candidate = events[sbn.key]
+        if (candidate?.kind != "notification" || candidate.expires <= now ||
+            !attached || !panel.isAttachedToWindow || currentKey != sbn.key || !expanded ||
+            !Policy.mayReplaceHeadsUp(candidate.kind, n.fullScreenIntent != null,
+                sbn.isClearable || boostedCharging, 
+                (n.flags and (Notification.FLAG_ONGOING_EVENT or Notification.FLAG_FOREGROUND_SERVICE) != 0) && !boostedCharging,
+                n.visibility == Notification.VISIBILITY_SECRET)) return false
+        Diagnostics.record("Replaced OEM heads-up visual: package=${sbn.packageName}")
+        Diagnostics.publish(context)
+        return true
+    }
+    /**
+     * OEM charging hook calls this with a Xiaomi-supported charging label.
+     * Read-only: neither writes to power supply nor guesses live charger watts.
+     */
+    fun nativeChargingMode(raw: String) { safe {
+        if (!wasCharging || !enabled("charging")) return@safe
+        val label = raw.take(64).trim()
+        if (label.isEmpty()) return@safe
+        val fast = listOf("turbo", "hyper", "super", "quick", "67w").any {
+            label.contains(it, ignoreCase = true)
+        }
+        Diagnostics.record("Xiaomi charging API observed, fastModeHint=$fast")
+        Diagnostics.publish(context)
+        if (fast) {
+            val e = events["battery"] ?: return@safe
+            if (!e.text.contains("Turbo charging")) {
+                events["battery"] = e.copy(text = "${e.text} · Turbo charging")
+                redraw()
+            }
+        }
+    } }
+
+    /**
+     * Called from the installed Xiaomi MIUIStrongToast charging model.
+     * The OEM's floating charge toast is replaced only after a real SakuraIsland
+     * charging event was successfully attached; we do not hide other toast types.
+     * The model's fractional battery level is accepted only when it matches the
+     * ordinary system battery broadcast closely (within 3 percentage points).
+     */
+    fun replaceNativeChargeToast(chargeLabel: String, oemLevel: Float): Boolean {
+        if (Looper.myLooper() != Looper.getMainLooper() || disposed || failed ||
+            !enabled("replace_charge_toast") || !enabled("charging") || !wasCharging ||
+            chargeLabel.isBlank() || !eligible()) return false
+        val original = events["battery"] ?: return false
+        val calibrated = if(Policy.validOemBatteryLevel(oemLevel, lastBatteryLevel)) {
+            java.lang.String.format(java.util.Locale.US, "%.2f", oemLevel) + "%"
+        } else null
+        val label = calibrated ?: if(lastBatteryLevel >= 0) "$lastBatteryLevel%" else "Charging"
+        val hint = if(listOf("turbo","super","67w","fast").any {
+            chargeLabel.contains(it, ignoreCase=true)
+        }) " · Turbo charging" else " battery"
+        events["battery"] = original.copy(text=label + hint,
+            expires=SystemClock.elapsedRealtime() + 6500L)
+        if (enabled("charging_expand")) autoExpandKey = "battery"
+        redraw()
+        val replaced = attached && panel.isAttachedToWindow &&
+            (currentKey == "battery" || (events[currentKey]?.chargingBoost == true && expanded))
+        if (replaced) {
+            Diagnostics.record("Replaced Xiaomi charging toast with native data; fractionalLevel=${calibrated != null}")
+            Diagnostics.publish(context)
+        }
+        return replaced
+    }
+
+    /** Focusable SystemUI-owned prompt; never inject text into the non-focusable island window. */
+    private fun openReplyDialog(event: IslandEvent, reply: IslandReply) {
+        if (!eligible() || replyDialog?.isShowing == true) return
+        val field = EditText(context).apply {
+            hint = "Type a reply"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or
+                android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            minLines = 1; maxLines = 4
+            setPadding(dp(18),dp(12),dp(18),dp(12))
+        }
+        val container = FrameLayout(context).apply {
+            setPadding(dp(12),dp(8),dp(12),dp(8))
+            addView(field, FrameLayout.LayoutParams(-1,-2))
+        }
+        val dialog = AlertDialog.Builder(context)
+            .setTitle("Reply · ${event.appLabel ?: event.title}")
+            .setView(container)
+            .setNegativeButton("Cancel",null)
+            .setPositiveButton("Send",null)
+            .create()
+        // SystemUI is privileged to present this trusted overlay.
+        dialog.window?.setType(2017)
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val message = field.text.toString().trim()
+                if(message.isEmpty()) {
+                    field.error = "Write a message"
+                    return@setOnClickListener
+                }
+                try {
+                    val results = Bundle()
+                    reply.inputs.forEach { results.putCharSequence(it.resultKey,message) }
+                    val fillIn = Intent().apply {
+                        addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
+                    }
+                    android.app.RemoteInput.addResultsToIntent(reply.inputs, fillIn, results)
+                    reply.intent.send(context, 0, fillIn)
+                    repliedKeys[event.key] = (SystemClock.elapsedRealtime() + 6000L) to message
+                    events.remove(event.key)
+                    expanded = false
+                    dialog.dismiss()
+                    redraw()
+                    Diagnostics.record("Inline reply sent; package not logged, content never stored")
+                } catch (e: PendingIntent.CanceledException) {
+                    field.error = "Reply action expired; open the app"
+                } catch (e: Exception) {
+                    field.error = "Couldn't send; open the app"
+                }
+            }
+            field.requestFocus()
+            dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE)
+        }
+        dialog.setOnDismissListener { if(replyDialog === dialog) replyDialog = null }
+        replyDialog = dialog
+        try { dialog.show() } catch (t: Throwable) {
+            replyDialog = null
+            Diagnostics.record("Reply dialog unavailable: ${t.javaClass.simpleName}")
+        }
+    }
+
     private fun eligible() = enabled("enabled") && power.isInteractive && !keyguard.isKeyguardLocked &&
         host.isAttachedToWindow && host.isShown && context.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT
+
+    private fun pendingNotifications(now: Long = SystemClock.elapsedRealtime()) =
+        events.values.filter { it.kind == "notification" && it.expires > now }.sortedByDescending { it.time }
+
+    private fun nextNotification() {
+        val items = pendingNotifications()
+        if (items.size < 2) return
+        val current = selectedNotificationKey ?: currentKey
+        selectedNotificationKey = Policy.nextAlertKey(items.map { it.key }, current)
+        autoExpandKey = selectedNotificationKey
+        redraw()
+    }
     private fun redraw() {
         main.removeCallbacks(expiry)
-        val now = SystemClock.elapsedRealtime(); events.entries.removeAll { it.value.expires <= now }
-        val key = Policy.select(events.values.map { EventRank(it.key, it.priority, it.time, it.expires) }, now)
+        main.removeCallbacks(progressTick)
+        val now = SystemClock.elapsedRealtime()
+        events.entries.removeAll { it.value.expires <= now }
+        val selected = Policy.select(events.values.map { EventRank(it.key, it.priority, it.time, it.expires) }, now)
+        val manual = selectedNotificationKey?.let { events[it] }?.takeIf {
+            it.expires > now && it.kind == "notification" && (events[selected]?.priority ?: 0) <= 65
+        }
+        val key = manual?.key ?: selected
         val event = events[key]
         if (!eligible() || (event == null && !enabled("idle"))) {
             currentKey = null; expanded = false; hide(); return
         }
-        if (event == null) {
-            currentKey = null
+        if (currentKey != key) {
             expanded = false
-            buildIdleContent()
-        } else {
-            if (currentKey != key) { expanded = false; currentKey = key }
-            val nextExpiry = events.values.minOf { it.expires }
-            if (nextExpiry != Long.MAX_VALUE) main.postDelayed(expiry, (nextExpiry - now).coerceAtLeast(1))
-            buildContent(event)
+            currentKey = key
         }
-        // An idle pill is purely decorative and must not intercept status bar touches.
-        params.flags = params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
-        if (event == null) params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        // Updating the same app notification key with a new message should
+        // re-open the preview as well, rather than leave the island collapsed.
+        if (key != null && key == autoExpandKey && eligible()) {
+            expanded = true
+            autoExpandKey = null
+            main.removeCallbacks(collapse)
+            main.postDelayed(collapse, value("alert_duration", 3000, 12000).toLong())
+        }
+        if (event != null) {
+            val nextExpiry = events.values.minOfOrNull { it.expires } ?: Long.MAX_VALUE
+            if (nextExpiry != Long.MAX_VALUE) main.postDelayed(expiry, (nextExpiry - now).coerceAtLeast(1))
+        } else {
+            expanded = false
+        }
         val cutout = host.rootWindowInsets?.displayCutout?.boundingRectTop?.takeUnless { it.isEmpty }
         val screenWidth = context.resources.displayMetrics.widthPixels
-        params.x = if (cutout != null) cutout.centerX() - screenWidth / 2 else 0
-        val compactHeight = maxOf(dp(value("height", 28, 52)), (cutout?.bottom ?: 0) + dp(4))
-        params.y = ((cutout?.top ?: dp(6)) + dp(value("offset", -4, 24))).coerceAtLeast(0)
-        val cutoutWidth = (cutout?.width() ?: 0) + dp(24)
-        val targetWidth = if (event == null) maxOf(dp(78), cutoutWidth) else maxOf(dp(if (expanded) 340 else value("width", 120, 240)), if (expanded) 0 else cutoutWidth)
-        val width = minOf(targetWidth, screenWidth - dp(24))
-        val height = if (expanded) maxOf(dp(164), compactHeight + dp(118)) else compactHeight
+        val centerX = cutout?.centerX() ?: screenWidth / 2
+        params.x = centerX - screenWidth / 2
+        params.y = ((cutout?.top ?: dp(5)) + dp(value("offset", -4, 24))).coerceAtLeast(0)
+        val cutoutWidth = (cutout?.width() ?: dp(12)) + dp(12)
+        val compactHeight = maxOf(dp(value("height", 28, 52)), (cutout?.bottom ?: 0) - params.y + dp(5))
+        // Distinct idle capsule sizing: never reuse the physical cutout diameter as pill width.
+        // The image reference is a horizontal ~3:1 capsule, not a circular notch mask.
+        val idleHeight = maxOf(dp(value("idle_height", 28, 44)), (cutout?.bottom ?: 0) - params.y + dp(4))
+        val safeWidth = safeCompactWidth(centerX, screenWidth).coerceAtLeast(cutoutWidth)
+        val idleWidth = minOf(maxOf(dp(value("idle_width", 72, 132)), cutoutWidth + dp(8)), safeWidth)
+        val compactWidth = minOf(maxOf(dp(value("width", 120, 240)), cutoutWidth + dp(58)), safeWidth)
+        val cameraOnly = compactWidth < cutoutWidth + dp(58)
+        val width = when {
+            expanded && event?.kind == "notification" -> minOf(dp(310), screenWidth - dp(32))
+            expanded && event?.kind == "charging" -> minOf(dp(292), screenWidth - dp(32))
+            expanded && (event?.kind == "call" || event?.kind == "timer") -> minOf(dp(310), screenWidth - dp(32))
+            expanded -> minOf(dp(330), screenWidth - dp(24))
+            event == null || cameraOnly -> idleWidth
+            else -> compactWidth
+        }
+        val height = when {
+            expanded && event?.kind == "notification" -> {
+                val cameraPx = ((cutout?.bottom ?: dp(25)) - params.y + dp(9)).coerceAtLeast(dp(38))
+                Policy.alertCardHeightDp(Policy.alertPreviewLines(event.text).coerceAtMost(value("alert_lines",2,6)),
+                    (cameraPx / context.resources.displayMetrics.density).toInt(), event.actions.isNotEmpty() || event.intent != null).let(::dp)
+            }
+            expanded && event?.kind == "charging" -> maxOf(dp(156), compactHeight + dp(116))
+            expanded && (event?.kind == "call" || event?.kind == "timer") -> maxOf(dp(190), compactHeight + dp(140))
+            expanded && event?.kind == "media" -> maxOf(dp(218), compactHeight + dp(181))
+            expanded -> maxOf(dp(232), compactHeight + dp(185))
+            event == null || cameraOnly -> idleHeight
+            else -> compactHeight
+        }
+
+        params.flags = params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+        if (event == null) {
+            params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+            visuals.idle()
+        } else {
+            val clearance = ((cutout?.bottom ?: dp(25)) - params.y + dp(8)).coerceAtLeast(dp(30))
+            // The camera occupies a real hole in the display; render an unobstructed
+            // fallback capsule rather than squeezing album artwork over that hole.
+            if (!expanded && cameraOnly) {
+                visuals.idle()
+            } else visuals.render(event, expanded, clearance, cutoutWidth + dp(8),
+                compactHeight, enabled("chroma"), enabled("motion"),
+                value("alert_lines", 2, 6), if (enabled("notification_queue")) pendingNotifications(now).size else 0) { which ->
+                safe {
+                    when (which) {
+                        "previous" -> event.media?.transportControls?.skipToPrevious()
+                        "next" -> event.media?.transportControls?.skipToNext()
+                        "playpause" -> event.media?.let { c ->
+                            if (c.playbackState?.state == PlaybackState.STATE_PLAYING) c.transportControls.pause()
+                            else c.transportControls.play()
+                        }
+                        "open" -> {
+                            event.intent?.send()
+                            expanded = false; redraw()
+                        }
+                        "reply" -> event.reply?.let { openReplyDialog(event, it) }
+                        "notification_action_0", "notification_action_1" -> {
+                            val index = if(which.endsWith("1")) 1 else 0
+                            event.actions.getOrNull(index)?.intent?.send()
+                            events.remove(event.key)
+                            expanded = false; redraw()
+                        }
+                        "collapse" -> { expanded = false; redraw() }
+                        "queue_next" -> nextNotification()
+                        "dismiss_card" -> {
+                            events.remove(event.key)
+                            selectedNotificationKey = null
+                            expanded = false
+                            redraw()
+                        }
+                    }
+                }
+            }
+            panel.setOnClickListener {
+                safe {
+                    if (eligible()) {
+                        if (enabled("haptics")) panel.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                        expanded = !expanded
+                        redraw()
+                        main.removeCallbacks(collapse)
+                        if (expanded) main.postDelayed(collapse, 12000)
+                    } else hide()
+                }
+            }
+            // Do not swallow ACTION_DOWN on the root panel: doing so prevents
+            // descendants (transport controls and scrubbing) from getting touches.
+            // The parent click handler expands/collapses only on empty content.
+            // Compact gestures do not contain any actionable child controls.
+            // Expanded views release all pointer events to their real buttons/seekbar.
+            if (!expanded) {
+                val gestures = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
+                    override fun onDown(e: MotionEvent): Boolean = true
+                    override fun onSingleTapUp(e: MotionEvent): Boolean {
+                        panel.performClick()
+                        return true
+                    }
+                    override fun onLongPress(e: MotionEvent) {
+                        if (enabled("haptics")) panel.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                        expanded = true
+                        redraw()
+                    }
+                    override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float): Boolean {
+                        val horizontal = kotlin.math.abs(velocityX) > kotlin.math.abs(velocityY)
+                        if(horizontal && event.kind == "notification" && enabled("notification_queue")) {
+                            nextNotification()
+                            return true
+                        }
+                        return false
+                    }
+                })
+                panel.setOnTouchListener { _, motion -> gestures.onTouchEvent(motion) }
+            } else panel.setOnTouchListener(null)
+            if (expanded && event.media != null) main.postDelayed(progressTick,1000L)
+        }
+
         if (!attached) {
             params.width = width; params.height = height
             window.addView(panel, params); attached = true
-            Diagnostics.record("SystemUI island window attached")
+            Diagnostics.record("Sakura island window attached")
+            // Read-only dimensions collected on the device, never hardcoded from APK mockups.
+            Diagnostics.record("Geometry displayWidthPx=$screenWidth density=${context.resources.displayMetrics.density} cutoutTop=${cutout?.flattenToString() ?: "none"} windowX=${params.x} windowY=${params.y} idle=${value("idle_width",72,132)}x${value("idle_height",28,44)}dp")
             Diagnostics.publish(context)
         } else animateSize(width, height)
         manageIcons()
     }
+
+    /** Ignore wide SystemUI parent containers: they include the camera but are not icons. */
+    private fun safeCompactWidth(centerX: Int, screenWidth: Int): Int {
+        var left = dp(8)
+        var right = screenWidth - dp(8)
+        val rect = Rect()
+        val names = listOf("clock", "notificationIcons", "statusIcons",
+            "notification_icon_area_inner", "status_bar_clock", "system_icons")
+        for (name in names) {
+            val id = context.resources.getIdentifier(name, "id", "com.android.systemui")
+            if (id == 0) continue
+            val view = host.rootView.findViewById<View>(id) ?: continue
+            if (!view.isShown || !view.getGlobalVisibleRect(rect)) continue
+            // Containers spanning the cutout were erroneously reducing the music pill
+            // to ~40dp and pushing album art directly onto the physical lens.
+            if (rect.width() > screenWidth / 3 || rect.contains(centerX, rect.centerY())) continue
+            if (rect.right < centerX) left = maxOf(left, rect.right + dp(6))
+            if (rect.left > centerX) right = minOf(right, rect.left - dp(6))
+        }
+        return (minOf(centerX - left, right - centerX).coerceAtLeast(dp(20)) * 2)
+    }
     private fun animateSize(w: Int, h: Int) {
         animator?.cancel()
+        if (!enabled("motion")) {
+            params.width = w; params.height = h
+            if (attached) window.updateViewLayout(panel, params)
+            return
+        }
         if (params.width == w && params.height == h) { window.updateViewLayout(panel, params); return }
         val fromW = params.width; val fromH = params.height
         animator = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = value("speed", 100, 700).toLong(); interpolator = DecelerateInterpolator()
+            duration = value("speed", 100, 700).toLong()
+            interpolator = android.view.animation.PathInterpolator(.22f, 0f, .12f, 1f)
             addUpdateListener { animation -> safe {
                 val f = animation.animatedValue as Float
                 params.width = (fromW + (w - fromW) * f).toInt(); params.height = (fromH + (h - fromH) * f).toInt()
                 if (attached) window.updateViewLayout(panel, params)
             } }; start()
-        }
-    }
-    private fun text(value: String, size: Float) = TextView(context).apply {
-        text = value; textSize = size; setTextColor(Color.WHITE); maxLines = if (expanded) 2 else 1
-        ellipsize = android.text.TextUtils.TruncateAt.END
-    }
-    private fun buildIdleContent() {
-        panel.removeAllViews()
-        panel.setPadding(0, 0, 0, 0)
-        panel.setOnClickListener(null)
-        panel.setOnTouchListener(null)
-        panel.contentDescription = "Sakura Island idle"
-    }
-    private fun buildContent(e: IslandEvent) {
-        panel.removeAllViews()
-        val cutoutBottom = host.rootWindowInsets?.displayCutout?.boundingRectTop?.bottom ?: dp(26)
-        val topPadding = if (expanded) maxOf(dp(30), cutoutBottom - params.y + dp(6)) else dp(2)
-        panel.setPadding(dp(if (expanded) 18 else 10), topPadding, dp(if (expanded) 18 else 10), dp(6))
-
-        val row = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
-        if (expanded) {
-            val art = ImageView(context).apply {
-                if (e.art != null) setImageBitmap(e.art)
-                else setImageResource(android.R.drawable.ic_media_play)
-                scaleType = ImageView.ScaleType.CENTER_CROP
-                background = GradientDrawable().apply {
-                    setColor(0xFF302B35.toInt())
-                    cornerRadius = dp(12).toFloat()
-                }
-                clipToOutline = true
-                contentDescription = "Activity artwork"
-            }
-            row.addView(art, LinearLayout.LayoutParams(dp(52), dp(52)))
-            val titles = LinearLayout(context).apply {
-                orientation = LinearLayout.VERTICAL
-                gravity = Gravity.CENTER_VERTICAL
-            }
-            titles.addView(text(e.title, 16f).apply {
-                setTypeface(typeface, android.graphics.Typeface.BOLD)
-                maxLines = 1
-            })
-            titles.addView(text(e.text, 13f).apply {
-                setTextColor(0xFFB9B4C2.toInt())
-                maxLines = 1
-            })
-            row.addView(titles, LinearLayout.LayoutParams(0, dp(52), 1f).apply {
-                marginStart = dp(12)
-            })
-            panel.addView(row, LinearLayout.LayoutParams(-1, -2))
-
-            e.media?.let { controller ->
-                val duration = controller.metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L
-                if (duration > 0L) {
-                    val position = (controller.playbackState?.position ?: 0L).coerceIn(0L, duration)
-                    panel.addView(ProgressBar(context, null, android.R.attr.progressBarStyleHorizontal).apply {
-                        max = 1000
-                        progress = ((position * 1000L) / duration).toInt()
-                        progressTintList = ColorStateList.valueOf(0xFFE6A5CB.toInt())
-                        progressBackgroundTintList = ColorStateList.valueOf(0xFF48404F.toInt())
-                    }, LinearLayout.LayoutParams(-1, dp(3)).apply {
-                        topMargin = dp(12)
-                        bottomMargin = dp(8)
-                    })
-                }
-            }
-
-            val controls = LinearLayout(context).apply {
-                gravity = Gravity.CENTER
-                orientation = LinearLayout.HORIZONTAL
-            }
-            fun actionButton(icon: Int, label: String, action: () -> Unit) {
-                val control = ImageButton(context).apply {
-                    setImageResource(icon)
-                    imageTintList = ColorStateList.valueOf(Color.WHITE)
-                    contentDescription = label
-                    background = GradientDrawable().apply {
-                        setColor(0xFF302B35.toInt())
-                        cornerRadius = dp(24).toFloat()
-                    }
-                    scaleType = ImageView.ScaleType.CENTER_INSIDE
-                    setPadding(dp(11), dp(11), dp(11), dp(11))
-                    setOnClickListener { safe { if (eligible()) action() else hide() } }
-                }
-                controls.addView(control, LinearLayout.LayoutParams(dp(42), dp(42)).apply {
-                    marginStart = dp(4); marginEnd = dp(4)
-                })
-            }
-            e.media?.let { controller ->
-                val actions = controller.playbackState?.actions ?: 0L
-                if (actions and PlaybackState.ACTION_SKIP_TO_PREVIOUS != 0L)
-                    actionButton(android.R.drawable.ic_media_previous, "Previous track") { controller.transportControls.skipToPrevious() }
-                val playing = controller.playbackState?.state == PlaybackState.STATE_PLAYING
-                if (actions and (PlaybackState.ACTION_PLAY_PAUSE or if (playing) PlaybackState.ACTION_PAUSE else PlaybackState.ACTION_PLAY) != 0L)
-                    actionButton(if (playing) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
-                        if (playing) "Pause" else "Play") {
-                        if (playing) controller.transportControls.pause() else controller.transportControls.play()
-                    }
-                if (actions and PlaybackState.ACTION_SKIP_TO_NEXT != 0L)
-                    actionButton(android.R.drawable.ic_media_next, "Next track") { controller.transportControls.skipToNext() }
-            }
-            e.intent?.let { destination ->
-                actionButton(android.R.drawable.ic_menu_view, "Open activity") {
-                    destination.send(); expanded = false; redraw()
-                }
-            }
-            actionButton(android.R.drawable.ic_menu_close_clear_cancel, "Collapse island") {
-                expanded = false; redraw()
-            }
-            panel.addView(controls, LinearLayout.LayoutParams(-1, dp(48)).apply {
-                topMargin = if (e.media != null) dp(4) else dp(14)
-            })
-        } else {
-            if (e.art != null) {
-                row.addView(ImageView(context).apply {
-                    setImageBitmap(e.art)
-                    scaleType = ImageView.ScaleType.CENTER_CROP
-                    background = GradientDrawable().apply {
-                        setColor(0xFF302B35.toInt())
-                        cornerRadius = dp(6).toFloat()
-                    }
-                    clipToOutline = true
-                    contentDescription = "Album artwork"
-                }, LinearLayout.LayoutParams(dp(24), dp(24)))
-            }
-            row.addView(text(if (e.media != null) "Music" else if (e.priority == 100) "Call" else "●", 12f),
-                LinearLayout.LayoutParams(0, -2, 1f).apply {
-                    marginStart = if (e.art != null) dp(4) else 0
-                })
-            row.addView(Space(context), LinearLayout.LayoutParams(dp(40), 1))
-            row.addView(text(if (e.media?.playbackState?.state == PlaybackState.STATE_PLAYING) "♫" else e.title, 12f),
-                LinearLayout.LayoutParams(0, -2, 1f))
-            panel.addView(row)
-        }
-        panel.contentDescription = "${e.title}. ${if (expanded) e.text else "Tap to expand"}"
-        panel.setOnClickListener {
-            safe {
-                if (eligible()) {
-                    expanded = !expanded
-                    redraw()
-                    main.removeCallbacks(collapse)
-                    if (expanded) main.postDelayed(collapse, 10000)
-                } else hide()
-            }
-        }
-        var downX = 0f
-        panel.setOnTouchListener { v, motion ->
-            when (motion.actionMasked) {
-                MotionEvent.ACTION_DOWN -> { downX = motion.x; true }
-                MotionEvent.ACTION_UP -> {
-                    safe {
-                        if (kotlin.math.abs(motion.x - downX) > dp(48) && e.dismissible) {
-                            events.remove(e.key); expanded = false; redraw()
-                        } else v.performClick()
-                    }
-                    true
-                }
-                MotionEvent.ACTION_CANCEL -> true
-                else -> true
-            }
         }
     }
     private fun manageIcons() {
@@ -379,12 +690,13 @@ class IslandRuntime(val host: View) {
     }
     private fun restoreIcons() { hiddenIcons.forEach { (v, alpha) -> if (v.alpha == 0f) v.alpha = alpha }; hiddenIcons.clear() }
     private fun hide() {
-        animator?.cancel(); animator = null; restoreIcons()
+        animator?.cancel(); animator = null; main.removeCallbacks(progressTick); restoreIcons()
         if (attached) { try { window.removeViewImmediate(panel) } catch (_: Exception) { }; attached = false }
     }
     fun dispose() {
-        disposed = true; main.removeCallbacksAndMessages(null); hide(); media?.stop(); media = null
+        disposed = true; replyDialog?.dismiss(); replyDialog = null; main.removeCallbacksAndMessages(null); hide(); media?.stop(); media = null
         host.removeOnLayoutChangeListener(layoutListener)
+        appIconCache.clear()
         try { context.unregisterReceiver(receiver) } catch (_: Exception) { }
         context.contentResolver.unregisterContentObserver(observer); events.clear()
     }
