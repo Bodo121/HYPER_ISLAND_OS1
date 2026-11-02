@@ -91,6 +91,7 @@ class IslandRuntime(val host: View) {
                     val charging = i.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0
                     val level = i.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
                     val scale = i.getIntExtra(BatteryManager.EXTRA_SCALE, 100).coerceAtLeast(1)
+                    lastBatteryLevel = if(level in 0..scale) level * 100 / scale else -1
                     if (enabled("charging") && charging && !wasCharging) {
                         val batteryLabel = if(level in 0..scale) "${level * 100 / scale}% battery" else "Charging connected"
                         events["battery"] = IslandEvent("battery", "Charging", batteryLabel, 85,
@@ -109,6 +110,7 @@ class IslandRuntime(val host: View) {
         } }
     }
     private var wasCharging = false
+    private var lastBatteryLevel = -1
     private fun dp(v: Int) = (v * context.resources.displayMetrics.density).toInt()
     private fun enabled(k: String) = options[k] == "true"
     private fun value(k: String, min: Int, max: Int) = (options[k]?.toIntOrNull() ?: Config.defaults[k]!!.toInt()).coerceIn(min, max)
@@ -330,6 +332,38 @@ class IslandRuntime(val host: View) {
             }
         }
     } }
+
+    /**
+     * Called from the installed Xiaomi MIUIStrongToast charging model.
+     * The OEM's floating charge toast is replaced only after a real SakuraIsland
+     * charging event was successfully attached; we do not hide other toast types.
+     * The model's fractional battery level is accepted only when it matches the
+     * ordinary system battery broadcast closely (within 3 percentage points).
+     */
+    fun replaceNativeChargeToast(chargeLabel: String, oemLevel: Float): Boolean {
+        if (Looper.myLooper() != Looper.getMainLooper() || disposed || failed ||
+            !enabled("replace_charge_toast") || !enabled("charging") || !wasCharging ||
+            chargeLabel.isBlank() || !eligible()) return false
+        val original = events["battery"] ?: return false
+        val calibrated = if(lastBatteryLevel >= 0 && oemLevel in 1f..100f &&
+            kotlin.math.abs(oemLevel - lastBatteryLevel) < 3f) {
+            java.lang.String.format(java.util.Locale.US, "%.2f", oemLevel) + "%"
+        } else null
+        val label = calibrated ?: if(lastBatteryLevel >= 0) "$lastBatteryLevel%" else "Charging"
+        val hint = if(listOf("turbo","super","67w","fast").any {
+            chargeLabel.contains(it, ignoreCase=true)
+        }) " · Turbo charging" else " battery"
+        events["battery"] = original.copy(text=label + hint,
+            expires=SystemClock.elapsedRealtime() + 6500L)
+        if (enabled("charging_expand")) autoExpandKey = "battery"
+        redraw()
+        val replaced = attached && panel.isAttachedToWindow && currentKey == "battery"
+        if (replaced) {
+            Diagnostics.record("Replaced Xiaomi charging toast with native data; fractionalLevel=${calibrated != null}")
+            Diagnostics.publish(context)
+        }
+        return replaced
+    }
 
     private fun eligible() = enabled("enabled") && power.isInteractive && !keyguard.isKeyguardLocked &&
         host.isAttachedToWindow && host.isShown && context.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT
