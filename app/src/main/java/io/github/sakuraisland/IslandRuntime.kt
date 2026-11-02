@@ -46,6 +46,7 @@ class IslandRuntime(val host: View) {
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN, PixelFormat.TRANSLUCENT).apply {
         gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
         layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+        setFitInsetsTypes(0)
         title = "SakuraIsland (SystemUI)"
     }
     private var media: MediaSource? = null
@@ -84,6 +85,10 @@ class IslandRuntime(val host: View) {
         }
     }
     fun start() {
+        // The supplied ROM's MIUIStrongToast uses this same SystemUI window type and trust marker.
+        Diagnostics.guard("trusted SystemUI window") {
+            WindowManager.LayoutParams::class.java.getMethod("setTrustedOverlay").invoke(params)
+        }
         context.contentResolver.registerContentObserver(Config.uri, false, observer)
         context.registerReceiver(receiver, IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_OFF); addAction(Intent.ACTION_USER_PRESENT)
@@ -163,6 +168,7 @@ class IslandRuntime(val host: View) {
             params.width = width; params.height = height
             window.addView(panel, params); attached = true
             Diagnostics.record("SystemUI island window attached")
+            Diagnostics.publish(context)
         } else animateSize(width, height)
         manageIcons()
     }

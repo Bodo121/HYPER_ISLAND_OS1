@@ -1,5 +1,7 @@
 # Research record — 2026-11-02
 
+**Follow-up:** the owner has since supplied SystemUI/plugin APKs and a runtime report. Findings and hashes are in [ROM_INSPECTION.md](ROM_INSPECTION.md); the original discovery record below describes the evidence available before those files arrived.
+
 ## Source inspected
 
 Repositories were fetched from their public GitHub origins. CustoMIUIzer's initial checkout hit Windows path limits in unrelated `.agents` files; its `app`, `README.md` and `LICENSE` were explicitly restored and inspected. No instructions from upstream repos were used to authorize actions.

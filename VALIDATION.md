@@ -1,5 +1,9 @@
 # Validation — 2026-11-02
 
+## 0.1.1 update
+
+After inspecting the user-supplied files, `assembleDebug testDebugUnitTest lintDebug` passed again. Seven tests passed with zero failures/skips; lint reported zero errors and 14 warnings. The three added regressions cover short marketing names, unknown versions and conflicting full-version precedence. See [ROM_INSPECTION.md](ROM_INSPECTION.md) for the verified APK contracts. The supplied diagnostic confirms module execution, but the new renderer has not been exercised on the phone. The earlier build/run details below refer to 0.1.0.
+
 ## Executed locally on Windows
 
 - Gradle 8.13 / Temurin JDK 17.0.20.1 / Android platform 35.
@@ -40,4 +44,3 @@ The hosted APK uses its own runner-generated debug certificate; it is not byte-i
 10. Disabling via LSPosed and rebooting restores stock behavior.
 
 Only after these tests on OS1.0.39.0.ULIEUXM should device compatibility be reported.
-

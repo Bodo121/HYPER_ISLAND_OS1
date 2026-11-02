@@ -66,7 +66,7 @@ class SettingsActivity : AppCompatActivity() {
         }
         button("Disable all island features") { save("enabled", "false"); recreate() }
         body.addView(label("If SystemUI becomes unstable: disable SakuraIsland in LSPosed and restart. With an already authorized ADB connection, run: adb shell pm disable-user --user 0 io.github.sakuraisland, then reboot. If the UI cannot start, use your installed root manager's documented safe mode to disable LSPosed. No firmware flashing is required.", 13f))
-        body.addView(label("0.1.0 · Open-source experimental implementation\nNo overlay permission · No telemetry", 12f))
+        body.addView(label("0.1.1 · Open-source experimental implementation\nNo overlay permission · No telemetry", 12f))
     }
     private fun updatePreview() {
         preview.text = if (previewExpanded) "Sakura Sessions\nA moment of calm\nPrevious     Play     Next" else "♫        ●        Sakura"
@@ -98,11 +98,31 @@ class SettingsActivity : AppCompatActivity() {
     }
     private fun button(title: String, action: () -> Unit) { body.addView(MaterialButton(this).apply { text = title; setOnClickListener { action() } }) }
     private fun report() {
-        val report = contentResolver.query(Config.diagnostics, null, null, null, null)?.use { if (it.moveToFirst()) it.getString(1) else "No report" } ?: "No report"
-        androidx.appcompat.app.AlertDialog.Builder(this).setTitle("Compatibility diagnostics").setMessage(report)
-            .setPositiveButton("Close", null).setNeutralButton("Share") { _, _ ->
+        val report = readReport()
+        val content = label(report, 12f).apply { setTextIsSelectable(true); setPadding(dp(20), dp(12), dp(20), dp(12)) }
+        androidx.appcompat.app.AlertDialog.Builder(this).setTitle("Compatibility diagnostics")
+            .setView(ScrollView(this).apply { addView(content) })
+            .setNegativeButton("Close", null).setPositiveButton("Save full report") { _, _ ->
+                startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE); type = "text/plain"
+                    putExtra(Intent.EXTRA_TITLE, "SakuraIsland-diagnostics.txt")
+                }, 100)
+            }.setNeutralButton("Share") { _, _ ->
                 startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(Intent.EXTRA_TEXT, report) }, "Share diagnostics"))
             }.show()
+    }
+    private fun readReport() = contentResolver.query(Config.diagnostics, null, null, null, null)?.use {
+        if (it.moveToFirst()) it.getString(1) else "No report"
+    } ?: "No report"
+    @Deprecated("Activity result compatibility API")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == 100 && resultCode == RESULT_OK) data?.data?.let { uri ->
+            try {
+                checkNotNull(contentResolver.openOutputStream(uri, "wt")).bufferedWriter(Charsets.UTF_8).use { it.write(readReport()) }
+                Toast.makeText(this, "Full report saved", Toast.LENGTH_SHORT).show()
+            } catch (_: Exception) { Toast.makeText(this, "Could not save report", Toast.LENGTH_SHORT).show() }
+        }
     }
     private fun postTest() {
         val manager = getSystemService(NotificationManager::class.java)

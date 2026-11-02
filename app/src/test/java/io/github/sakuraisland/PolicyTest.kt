@@ -4,6 +4,18 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PolicyTest {
+    @Test fun marketingNameDoesNotMaskFullBuild() {
+        assertEquals("OS1.0.39.0.ULIEUXM", Policy.romVersion("", "OS1.0.39.0.ULIEUXM", "OS1.0"))
+        assertEquals("OS1.0.39.0.ULIEUXM", Policy.romVersion("OS1.0.39.0.ULIEUXM", "V816.0.39.0.ULIEUXM", "OS1.0"))
+    }
+    @Test fun unknownBuildDoesNotBroadenCompatibility() {
+        assertEquals("unknown", Policy.romVersion("", "", "OS1.0"))
+        assertEquals("unknown", Policy.romVersion("39.0", "V816.0.39.0.ULIEUXM", "OS1.0"))
+    }
+    @Test fun fullHyperBuildTakesPrecedenceOverStaleFallback() {
+        val resolved = Policy.romVersion("OS1.0.40.0.ULIEUXM", "OS1.0.39.0.ULIEUXM", "OS1.0")
+        assertFalse(Policy.target(34, "taoyao", resolved))
+    }
     @Test fun callsPreemptMediaAndExpiryRestoresMedia() {
         val events = listOf(EventRank("media", 40, 1, Long.MAX_VALUE), EventRank("call", 100, 2, 20))
         assertEquals("call", Policy.select(events, 10)); assertEquals("media", Policy.select(events, 20))

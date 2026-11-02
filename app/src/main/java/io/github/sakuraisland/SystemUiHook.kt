@@ -41,9 +41,14 @@ class SystemUiHook : IXposedHookLoadPackage {
         XposedHelpers.callStaticMethod(Class.forName("android.os.SystemProperties"), "get", name, "") as String
     } catch (_: Throwable) { "" }
     private fun install(loader: ClassLoader) {
-        val version = property("ro.mi.os.version.name").ifBlank { Build.VERSION.INCREMENTAL }
+        val name = property("ro.mi.os.version.name")
+        val incremental = property("ro.mi.os.version.incremental")
+        val version = Policy.romVersion(incremental, Build.VERSION.INCREMENTAL, name)
         val compatible = Policy.target(Build.VERSION.SDK_INT, Build.DEVICE, version)
-        Diagnostics.record("SakuraIsland 0.1 experimental; SDK=${Build.VERSION.SDK_INT}; device=${Build.DEVICE}; ROM=$version; exactTarget=$compatible")
+        Diagnostics.record("SakuraIsland 0.1.1 experimental; SDK=${Build.VERSION.SDK_INT}; device=${Build.DEVICE}; ROM=$version; exactTarget=$compatible")
+        Diagnostics.record("ro.mi.os.version.name=$name")
+        Diagnostics.record("ro.mi.os.version.incremental=$incremental")
+        Diagnostics.record("ro.build.version.incremental=${Build.VERSION.INCREMENTAL}")
         val candidates = listOf("com.android.systemui.statusbar.phone.PhoneStatusBarView",
             "com.android.systemui.statusbar.window.StatusBarWindowController",
             "com.android.systemui.statusbar.phone.StatusBar", "com.android.systemui.statusbar.phone.CentralSurfacesImpl",
@@ -56,7 +61,7 @@ class SystemUiHook : IXposedHookLoadPackage {
             val cls = XposedHelpers.findClassIfExists(name, loader)
             if (cls == null) Diagnostics.record("MISSING $name") else {
                 Diagnostics.record("FOUND $name")
-                cls.declaredMethods.sortedBy { it.name }.take(12).forEach { Diagnostics.record(it.toGenericString()) }
+                cls.declaredMethods.sortedBy { it.name }.take(3).forEach { Diagnostics.record(it.toGenericString()) }
             }
         } }
         XposedHelpers.findAndHookMethod(Application::class.java, "onCreate", object : XC_MethodHook() {
@@ -67,11 +72,19 @@ class SystemUiHook : IXposedHookLoadPackage {
         XposedBridge.hookAllConstructors(host, object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) { Diagnostics.guard("host capture") {
                 val view = param.thisObject as? View ?: return@guard
+                if (XposedHelpers.getAdditionalInstanceField(view, "sakura.lifecycle") != null) return@guard
+                XposedHelpers.setAdditionalInstanceField(view, "sakura.lifecycle", true)
                 view.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
                     override fun onViewAttachedToWindow(v: View) { Diagnostics.guard("host attach") {
                         if (v.display?.displayId != 0) return@guard
                         runtime?.dispose()
-                        runtime = IslandRuntime(v).also { it.start() }
+                        val next = IslandRuntime(v)
+                        runtime = next
+                        try { next.start() } catch (t: Throwable) {
+                            runtime = null
+                            Diagnostics.guard("partial attach cleanup") { next.dispose() }
+                            throw t
+                        }
                         Diagnostics.record("Status bar attached; SystemUI window owner captured")
                         Diagnostics.publish(v.context)
                     } }
@@ -85,8 +98,10 @@ class SystemUiHook : IXposedHookLoadPackage {
         val collection = XposedHelpers.findClassIfExists(candidates[5], loader)
         var hooks = 0
         collection?.declaredMethods?.filter {
-            it.name in setOf("onNotificationPosted", "onNotificationRemoved") &&
-                it.parameterTypes.firstOrNull() == StatusBarNotification::class.java && it.returnType == Void.TYPE
+            val parameters = it.parameterTypes.toList()
+            val common = listOf(StatusBarNotification::class.java, android.service.notification.NotificationListenerService.RankingMap::class.java)
+            it.returnType == Void.TYPE && ((it.name == "onNotificationPosted" && parameters == common) ||
+                (it.name == "onNotificationRemoved" && parameters == common + Integer.TYPE))
         }?.forEach { method ->
             Diagnostics.guard("notification hook") {
                 XposedBridge.hookMethod(method, object : XC_MethodHook() {

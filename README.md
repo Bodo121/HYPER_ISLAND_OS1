@@ -2,6 +2,12 @@
 
 Experimental SystemUI-integrated island for **Xiaomi 12 Lite (taoyao), Android 14, OS1.0.39.0.ULIEUXM**. This is an original Kotlin implementation informed by upstream research, not a binary port of HyperOS 3. **Physical-device compatibility is not established.**
 
+## 0.1.1 compatibility fix
+
+The supplied device report confirms the module loads, but 0.1.0 incorrectly treats `ro.mi.os.version.name=OS1.0` as the complete ROM version and blocks rendering. 0.1.1 resolves the complete version from HyperOS/build incremental properties, retaining the exact-build gate. It logs all three version fields. Target callback signatures and the SystemUI window pattern were checked against the supplied APKs; see [ROM_INSPECTION.md](ROM_INSPECTION.md). No actual rendering result is yet available.
+
+Update using an APK signed with the same development certificate as your installed build, restart the phone to reload LSPosed, enable the island and test. Use **View compatibility report → Save full report** if it stays hidden. CI and local debug APKs use different certificates; use a consistent download source. Root access does not require granting this settings app a root shell.
+
 ## What is implemented
 
 - Legacy Xposed/LSPosed entry point, scoped to the main SystemUI process.
@@ -44,7 +50,7 @@ GitHub Actions builds and uploads the debug APK and reports. The manual release 
 ## Remaining limitations
 
 - No emulator or physical HyperOS test has been performed. Hook availability, SystemUI window permission, touch routing, LSPosed recognition and positioning require device validation.
-- Exact firmware SystemUI APK was not extracted. No verified notification or media event on the target hardware can yet be claimed.
+- User-supplied SystemUI and plugin APKs have now been inspected. Their relevant notification signatures and window pattern are confirmed, but no rendered notification or media event on the target hardware can yet be claimed.
 - Notification events are captured after host attachment; existing notifications are not replayed. Paused media expires after 15 seconds. Message cards expire after 8 seconds; call/alarm cards after 30 seconds or native removal.
 - Calls/timers depend on notification categories; no direct telephony hook, live countdown parsing, answering calls, inline replies or vendor clock integration.
 - No audio-capture visualization. The music symbol is an indicator, not an audio spectrum.
