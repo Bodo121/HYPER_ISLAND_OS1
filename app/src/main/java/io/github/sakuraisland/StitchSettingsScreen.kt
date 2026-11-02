@@ -301,7 +301,7 @@ fun SakuraSettingsScreen(
                     }
                     OutlinedButton(onClick = onTestNotification, modifier = Modifier.fillMaxWidth()) {
                         Icon(Icons.Rounded.NotificationsActive, null)
-                        Spacer(Modifier.width(8.dp)); Text("Post test notification")
+                        Spacer(Modifier.width(8.dp)); Text("Test multiline + banner replacement")
                     }
                     TextButton(onClick = onDisable, modifier = Modifier.fillMaxWidth()) {
                         Text("Disable island rendering", color = Color(0xFFFFA0A9))
