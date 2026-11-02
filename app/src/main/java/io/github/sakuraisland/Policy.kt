@@ -37,5 +37,16 @@ object Policy {
                           clearable: Boolean, isOngoing: Boolean, secret: Boolean): Boolean =
         kind == "notification" && !hasFullScreenIntent && clearable && !isOngoing && !secret
 
+    fun validOemBatteryLevel(oem: Float, systemLevel: Int): Boolean =
+        systemLevel in 0..100 && oem in 1f..100f &&
+            kotlin.math.abs(oem - systemLevel) < 3f
+
+    /** One reusable queue rotation rule, with wraparound and expiry handled by caller. */
+    fun nextAlertKey(keys: List<String>, current: String?): String? {
+        if (keys.isEmpty()) return null
+        val index = keys.indexOf(current)
+        return keys[(index + 1) % keys.size]
+    }
+
     fun dimension(value: Int, min: Int, max: Int) = value.coerceIn(min, max)
 }
