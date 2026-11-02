@@ -165,6 +165,30 @@ class IslandRuntime(val host: View) {
             currentKey == "zen" && attached && panel.isAttachedToWindow
     }
 
+    /**
+     * Xiaomi's sound/DND visual is routed into the island at the volume dialog
+     * presentation boundary. The underlying volume/DND state is untouched.
+     */
+    fun onXiaomiSoundPopup(): Boolean {
+        if (disposed || failed || !enabled("enabled") || !eligible()) return false
+        val zen=notificationManager?.currentInterruptionFilter ?: NotificationManager.INTERRUPTION_FILTER_ALL
+        val ringer=audioManager?.ringerMode ?: android.media.AudioManager.RINGER_MODE_NORMAL
+        val dnd=zen != NotificationManager.INTERRUPTION_FILTER_ALL
+        val label=when {
+            dnd -> "Do Not Disturb is on"
+            ringer==android.media.AudioManager.RINGER_MODE_SILENT -> "Silent mode"
+            ringer==android.media.AudioManager.RINGER_MODE_VIBRATE -> "Vibrate mode"
+            else -> "Volume"
+        }
+        val key="sound_popup"
+        events[key]=IslandEvent(key,label,
+            if(dnd) "DND enabled" else "Sound profile",
+            96,expires=SystemClock.elapsedRealtime()+2600,kind="system")
+        autoExpandKey=key
+        redraw()
+        return attached && panel.isAttachedToWindow && currentKey==key
+    }
+
     private fun dp(v: Int) = (v * context.resources.displayMetrics.density).toInt()
     private fun enabled(k: String) = options[k] == "true"
     private fun value(k: String, min: Int, max: Int) = (options[k]?.toIntOrNull() ?: Config.defaults[k]!!.toInt()).coerceIn(min, max)
