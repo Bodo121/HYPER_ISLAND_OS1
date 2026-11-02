@@ -218,46 +218,148 @@ class IslandRuntime(val host: View) {
         panel.contentDescription = "Sakura Island idle"
     }
     private fun buildContent(e: IslandEvent) {
-        panel.removeAllViews(); panel.setPadding(dp(14), if (expanded) dp(42) else dp(2), dp(14), dp(4))
+        panel.removeAllViews()
+        val cutoutBottom = host.rootWindowInsets?.displayCutout?.boundingRectTop?.bottom ?: dp(26)
+        val topPadding = if (expanded) maxOf(dp(30), cutoutBottom - params.y + dp(6)) else dp(2)
+        panel.setPadding(dp(if (expanded) 18 else 10), topPadding, dp(if (expanded) 18 else 10), dp(6))
+
         val row = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
-        if (e.art != null) row.addView(ImageView(context).apply { setImageBitmap(e.art); scaleType = ImageView.ScaleType.CENTER_CROP; contentDescription = "Album artwork" }, LinearLayout.LayoutParams(dp(28), dp(28)))
         if (expanded) {
-            row.addView(text(e.title, 16f), LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(8) })
-            panel.addView(row); panel.addView(text(e.text, 13f))
-            val buttons = LinearLayout(context).apply { gravity = Gravity.CENTER }
-            fun button(label: String, action: () -> Unit) {
-                buttons.addView(Button(context).apply { text = label; textSize = 12f; minWidth = 0; setPadding(0, 0, 0, 0)
+            val art = ImageView(context).apply {
+                if (e.art != null) setImageBitmap(e.art)
+                else setImageResource(android.R.drawable.ic_media_play)
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                background = GradientDrawable().apply {
+                    setColor(0xFF302B35.toInt())
+                    cornerRadius = dp(12).toFloat()
+                }
+                clipToOutline = true
+                contentDescription = "Activity artwork"
+            }
+            row.addView(art, LinearLayout.LayoutParams(dp(52), dp(52)))
+            val titles = LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            titles.addView(text(e.title, 16f).apply {
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
+                maxLines = 1
+            })
+            titles.addView(text(e.text, 13f).apply {
+                setTextColor(0xFFB9B4C2.toInt())
+                maxLines = 1
+            })
+            row.addView(titles, LinearLayout.LayoutParams(0, dp(52), 1f).apply {
+                marginStart = dp(12)
+            })
+            panel.addView(row, LinearLayout.LayoutParams(-1, -2))
+
+            e.media?.let { controller ->
+                val duration = controller.metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L
+                if (duration > 0L) {
+                    val position = (controller.playbackState?.position ?: 0L).coerceIn(0L, duration)
+                    panel.addView(ProgressBar(context, null, android.R.attr.progressBarStyleHorizontal).apply {
+                        max = 1000
+                        progress = ((position * 1000L) / duration).toInt()
+                        progressTintList = ColorStateList.valueOf(0xFFE6A5CB.toInt())
+                        progressBackgroundTintList = ColorStateList.valueOf(0xFF48404F.toInt())
+                    }, LinearLayout.LayoutParams(-1, dp(3)).apply {
+                        topMargin = dp(12)
+                        bottomMargin = dp(8)
+                    })
+                }
+            }
+
+            val controls = LinearLayout(context).apply {
+                gravity = Gravity.CENTER
+                orientation = LinearLayout.HORIZONTAL
+            }
+            fun actionButton(icon: Int, label: String, action: () -> Unit) {
+                val control = ImageButton(context).apply {
+                    setImageResource(icon)
+                    imageTintList = ColorStateList.valueOf(Color.WHITE)
+                    contentDescription = label
+                    background = GradientDrawable().apply {
+                        setColor(0xFF302B35.toInt())
+                        cornerRadius = dp(24).toFloat()
+                    }
+                    scaleType = ImageView.ScaleType.CENTER_INSIDE
+                    setPadding(dp(11), dp(11), dp(11), dp(11))
                     setOnClickListener { safe { if (eligible()) action() else hide() } }
-                }, LinearLayout.LayoutParams(0, dp(48), 1f))
+                }
+                controls.addView(control, LinearLayout.LayoutParams(dp(42), dp(42)).apply {
+                    marginStart = dp(4); marginEnd = dp(4)
+                })
             }
-            e.media?.let { c ->
-                val actions = c.playbackState?.actions ?: 0L
-                if (actions and PlaybackState.ACTION_SKIP_TO_PREVIOUS != 0L) button("Previous") { c.transportControls.skipToPrevious() }
-                val playing = c.playbackState?.state == PlaybackState.STATE_PLAYING
+            e.media?.let { controller ->
+                val actions = controller.playbackState?.actions ?: 0L
+                if (actions and PlaybackState.ACTION_SKIP_TO_PREVIOUS != 0L)
+                    actionButton(android.R.drawable.ic_media_previous, "Previous track") { controller.transportControls.skipToPrevious() }
+                val playing = controller.playbackState?.state == PlaybackState.STATE_PLAYING
                 if (actions and (PlaybackState.ACTION_PLAY_PAUSE or if (playing) PlaybackState.ACTION_PAUSE else PlaybackState.ACTION_PLAY) != 0L)
-                    button(if (playing) "Pause" else "Play") { if (playing) c.transportControls.pause() else c.transportControls.play() }
-                if (actions and PlaybackState.ACTION_SKIP_TO_NEXT != 0L) button("Next") { c.transportControls.skipToNext() }
+                    actionButton(if (playing) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
+                        if (playing) "Pause" else "Play") {
+                        if (playing) controller.transportControls.pause() else controller.transportControls.play()
+                    }
+                if (actions and PlaybackState.ACTION_SKIP_TO_NEXT != 0L)
+                    actionButton(android.R.drawable.ic_media_next, "Next track") { controller.transportControls.skipToNext() }
             }
-            e.intent?.let { intent -> button("Open") { intent.send(); expanded = false; redraw() } }
-            button("Close") { expanded = false; redraw() }
-            panel.addView(buttons)
+            e.intent?.let { destination ->
+                actionButton(android.R.drawable.ic_menu_view, "Open activity") {
+                    destination.send(); expanded = false; redraw()
+                }
+            }
+            actionButton(android.R.drawable.ic_menu_close_clear_cancel, "Collapse island") {
+                expanded = false; redraw()
+            }
+            panel.addView(controls, LinearLayout.LayoutParams(-1, dp(48)).apply {
+                topMargin = if (e.media != null) dp(4) else dp(14)
+            })
         } else {
-            // Keep the camera's central area empty; identity on the left, activity on the right.
-            row.addView(text(if (e.media != null) "Music" else if (e.priority == 100) "Call" else "●", 12f), LinearLayout.LayoutParams(0, -2, 1f))
+            if (e.art != null) {
+                row.addView(ImageView(context).apply {
+                    setImageBitmap(e.art)
+                    scaleType = ImageView.ScaleType.CENTER_CROP
+                    background = GradientDrawable().apply {
+                        setColor(0xFF302B35.toInt())
+                        cornerRadius = dp(6).toFloat()
+                    }
+                    clipToOutline = true
+                    contentDescription = "Album artwork"
+                }, LinearLayout.LayoutParams(dp(24), dp(24)))
+            }
+            row.addView(text(if (e.media != null) "Music" else if (e.priority == 100) "Call" else "●", 12f),
+                LinearLayout.LayoutParams(0, -2, 1f).apply {
+                    marginStart = if (e.art != null) dp(4) else 0
+                })
             row.addView(Space(context), LinearLayout.LayoutParams(dp(40), 1))
-            row.addView(text(if (e.media?.playbackState?.state == PlaybackState.STATE_PLAYING) "♫" else e.title, 12f), LinearLayout.LayoutParams(0, -2, 1f))
+            row.addView(text(if (e.media?.playbackState?.state == PlaybackState.STATE_PLAYING) "♫" else e.title, 12f),
+                LinearLayout.LayoutParams(0, -2, 1f))
             panel.addView(row)
         }
         panel.contentDescription = "${e.title}. ${if (expanded) e.text else "Tap to expand"}"
-        panel.setOnClickListener { safe { if (eligible()) { expanded = !expanded; redraw(); main.removeCallbacks(collapse); if (expanded) main.postDelayed(collapse, 10000) } else hide() } }
+        panel.setOnClickListener {
+            safe {
+                if (eligible()) {
+                    expanded = !expanded
+                    redraw()
+                    main.removeCallbacks(collapse)
+                    if (expanded) main.postDelayed(collapse, 10000)
+                } else hide()
+            }
+        }
         var downX = 0f
         panel.setOnTouchListener { v, motion ->
             when (motion.actionMasked) {
                 MotionEvent.ACTION_DOWN -> { downX = motion.x; true }
-                MotionEvent.ACTION_UP -> { safe {
-                    if (kotlin.math.abs(motion.x - downX) > dp(48) && e.dismissible) { events.remove(e.key); expanded = false; redraw() }
-                    else v.performClick()
-                }; true }
+                MotionEvent.ACTION_UP -> {
+                    safe {
+                        if (kotlin.math.abs(motion.x - downX) > dp(48) && e.dismissible) {
+                            events.remove(e.key); expanded = false; redraw()
+                        } else v.performClick()
+                    }
+                    true
+                }
                 MotionEvent.ACTION_CANCEL -> true
                 else -> true
             }
