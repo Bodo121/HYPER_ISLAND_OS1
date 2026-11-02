@@ -59,6 +59,19 @@ class PolicyTest {
         assertFalse(Policy.mayReplaceHeadsUp("notification", false, false, true, false))
         assertFalse(Policy.mayReplaceHeadsUp("notification", false, true, false, true))
     }
+    @Test fun fractionalOemBatteryUsesSystemBroadcastAsSanityCheck() {
+        assertTrue(Policy.validOemBatteryLevel(89.83f, 89))
+        assertFalse(Policy.validOemBatteryLevel(0.89f, 89))
+        assertFalse(Policy.validOemBatteryLevel(99f, 89))
+        assertFalse(Policy.validOemBatteryLevel(Float.NaN, 89))
+    }
+    @Test fun notificationQueueWrapsSafely() {
+        val keys = listOf("new", "middle", "old")
+        assertEquals("middle", Policy.nextAlertKey(keys, "new"))
+        assertEquals("new", Policy.nextAlertKey(keys, "old"))
+        assertEquals("new", Policy.nextAlertKey(keys, "missing"))
+        assertNull(Policy.nextAlertKey(emptyList(), null))
+    }
     @Test fun exactTargetOnly() {
         assertTrue(Policy.target(34, "taoyao", "OS1.0.39.0.ULIEUXM"))
         assertFalse(Policy.target(35, "taoyao", "OS1.0.39.0.ULIEUXM"))
