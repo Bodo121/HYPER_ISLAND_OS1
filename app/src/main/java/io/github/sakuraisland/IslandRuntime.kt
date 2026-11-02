@@ -160,9 +160,10 @@ class IslandRuntime(val host: View) {
         val cutout = host.rootWindowInsets?.displayCutout?.boundingRectTop?.takeUnless { it.isEmpty }
         val screenWidth = context.resources.displayMetrics.widthPixels
         params.x = if (cutout != null) cutout.centerX() - screenWidth / 2 else 0
-        val compactHeight = maxOf(dp(value("height", 28, 52)), (cutout?.height() ?: 0) + dp(4))
+        val compactHeight = maxOf(dp(value("height", 28, 52)), (cutout?.bottom ?: 0) + dp(4))
         params.y = ((cutout?.top ?: dp(6)) + dp(value("offset", -4, 24))).coerceAtLeast(0)
-        val width = minOf(dp(if (expanded) 340 else value("width", 120, 240)), screenWidth - dp(24))
+        val cutoutWidth = (cutout?.width() ?: 0) + dp(24)
+        val width = minOf(maxOf(dp(if (expanded) 340 else value("width", 120, 240)), if (expanded) 0 else cutoutWidth), screenWidth - dp(24))
         val height = if (expanded) maxOf(dp(174), compactHeight + dp(120)) else compactHeight
         if (!attached) {
             params.width = width; params.height = height
@@ -230,6 +231,7 @@ class IslandRuntime(val host: View) {
                     if (kotlin.math.abs(motion.x - downX) > dp(48) && e.dismissible) { events.remove(e.key); expanded = false; redraw() }
                     else v.performClick()
                 }; true }
+                MotionEvent.ACTION_CANCEL -> true
                 else -> true
             }
         }
