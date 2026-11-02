@@ -239,6 +239,8 @@ fun SakuraSettingsScreen(
                     ConfigToggle("Ambient album colors", "Use artwork-derived gradients", enabled("chroma")) { set("chroma",it.toString()) }
                     HorizontalDivider(color = Hairline)
                     ConfigToggle("Motion effects", "Animated equalizer and capsule morphing", enabled("motion")) { set("motion",it.toString()) }
+                    HorizontalDivider(color = Hairline)
+                    ConfigToggle("Subtle touch feedback", "Vibrate only for your intentional island gestures", enabled("haptics")) { set("haptics",it.toString()) }
                     ConfigSlider("Idle capsule width", number("idle_width",72f,132f),72f..132f,"dp") { set("idle_width",it.toInt().toString()) }
                     ConfigSlider("Idle capsule height",number("idle_height",28f,44f),28f..44f,"dp") { set("idle_height",it.toInt().toString()) }
                     ConfigSlider("Compact width", number("width",120f,240f), 120f..240f, "dp") { set("width",it.toInt().toString()) }
