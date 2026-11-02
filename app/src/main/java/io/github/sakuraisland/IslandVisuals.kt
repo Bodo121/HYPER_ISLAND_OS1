@@ -173,7 +173,7 @@ internal class IslandVisuals(private val context: Context, private val panel: Li
                 ?: dp(184)
             val side = Policy.compactSideWidth(available, cameraCapPx, safeCorner)
             val iconPx = minOf(dp(24), side.coerceAtLeast(dp(14)))
-            val left = image(e,24,8)
+            val left = if(e.kind=="charging") VoltIconView(context) else image(e,24,8)
             row.addView(left, FrameLayout.LayoutParams(iconPx,iconPx,Gravity.START or Gravity.CENTER_VERTICAL).apply {
                 leftMargin = dp(9)
             })
@@ -209,7 +209,7 @@ internal class IslandVisuals(private val context: Context, private val panel: Li
             // Hardware support is documented by Xiaomi. These are capability labels:
             // they do not claim Dolby processing is active or 67 W is being delivered.
             if (android.os.Build.DEVICE == "taoyao" && (e.kind == "media" || e.kind == "charging")) {
-                val capability = text(if(e.kind == "media") "DOLBY ATMOS" else "UP TO 67W",10f,
+                val capability = text(if(e.kind == "media") "DOLBY CAPABLE" else "UP TO 67W",10f,
                     if(e.kind == "charging") Color.rgb(116,255,169) else secondary,true).apply {
                     contentDescription = if(e.kind == "media") "Device supports Dolby Atmos; current audio effect state unknown"
                         else "Device supports charging up to 67 watts; actual charging power unknown"
@@ -283,7 +283,7 @@ internal class IslandVisuals(private val context: Context, private val panel: Li
     /** Compact notification card: full multi-line preview, no media timeline or empty playback area. */
     private fun renderAlert(e: IslandEvent, accent: Int, alertLines: Int, queueCount: Int, action: (String) -> Unit) {
         val top = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
-        val eyebrow = text("NOTIFICATION", 9.5f, mix(accent,white,.48f), true).apply {
+        val eyebrow = text(e.appLabel?.uppercase()?.take(24) ?: "NOTIFICATION", 9.5f, mix(accent,white,.48f), true).apply {
             letterSpacing = .13f
         }
         top.addView(eyebrow, LinearLayout.LayoutParams(0,dp(16),1f))
@@ -357,7 +357,7 @@ internal class IslandVisuals(private val context: Context, private val panel: Li
         head.addView(text("UP TO 67 W",9.5f,secondary,true),LinearLayout.LayoutParams(-2,dp(19)))
         panel.addView(head, LinearLayout.LayoutParams(-1,dp(19)))
         val body = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
-        body.addView(image(e,39,11),LinearLayout.LayoutParams(dp(39),dp(39)))
+        body.addView(VoltIconView(context),LinearLayout.LayoutParams(dp(39),dp(39)))
         val data=LinearLayout(context).apply { orientation=LinearLayout.VERTICAL; gravity=Gravity.CENTER_VERTICAL }
         data.addView(text(e.text.substringBefore("·").trim(),20f,white,true),
             LinearLayout.LayoutParams(-1,dp(27)))
@@ -397,6 +397,12 @@ internal class IslandVisuals(private val context: Context, private val panel: Li
             }
             actions.addView(open,LinearLayout.LayoutParams(dp(67),dp(34)).apply { marginStart=dp(6) })
         }
+        val close = TextView(context).apply {
+            text="Close"; textSize=12f; setTextColor(secondary); gravity=Gravity.CENTER
+            background=rounded(Color.rgb(32,30,38),17); isClickable=true; isFocusable=true
+            setOnClickListener { action("collapse") }
+        }
+        actions.addView(close,LinearLayout.LayoutParams(dp(64),dp(34)).apply { marginStart=dp(6) })
         panel.addView(actions,LinearLayout.LayoutParams(-1,dp(37)).apply { topMargin=dp(8) })
     }
 
@@ -554,6 +560,30 @@ internal class IslandVisuals(private val context: Context, private val panel: Li
                 (Color.red(a)+(Color.red(b)-Color.red(a))*f).toInt().coerceIn(0,255),
                 (Color.green(a)+(Color.green(b)-Color.green(a))*f).toInt().coerceIn(0,255),
                 (Color.blue(a)+(Color.blue(b)-Color.blue(a))*f).toInt().coerceIn(0,255))
+        }
+    }
+
+    /** Lightweight vector asset, with no legacy pixelated battery icon. */
+    private class VoltIconView(context: Context): View(context) {
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        override fun onDraw(canvas: Canvas) {
+            val w = width.toFloat()
+            val h = height.toFloat()
+            if (w <= 0f || h <= 0f) return
+            val scale = minOf(w,h) / 44f
+            canvas.save()
+            canvas.translate((w-44f*scale)/2f,(h-44f*scale)/2f)
+            canvas.scale(scale,scale)
+            paint.color = Color.rgb(15,49,35)
+            canvas.drawRoundRect(RectF(0f,0f,44f,44f),12f,12f,paint)
+            paint.color = Color.rgb(106,251,171)
+            val bolt = android.graphics.Path().apply {
+                moveTo(24f,7f); lineTo(12f,25f); lineTo(22f,25f)
+                lineTo(19f,37f); lineTo(33f,19f); lineTo(23f,19f)
+                close()
+            }
+            canvas.drawPath(bolt,paint)
+            canvas.restore()
         }
     }
 
