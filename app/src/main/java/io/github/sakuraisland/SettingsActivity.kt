@@ -106,16 +106,23 @@ class SettingsActivity : ComponentActivity() {
 
     private fun postTest() {
         val manager = getSystemService(NotificationManager::class.java)
+        // A new HIGH-importance channel is needed: existing Android notification
+        // channels cannot have their importance raised by changing code.
+        val channel = "sakura_heads_up_test_v2"
         manager.createNotificationChannel(
-            NotificationChannel("test", "SakuraIsland test", NotificationManager.IMPORTANCE_DEFAULT)
+            NotificationChannel(channel, "SakuraIsland banner test", NotificationManager.IMPORTANCE_HIGH)
         )
         val open = PendingIntent.getActivity(
             this, 1, Intent(this, SettingsActivity::class.java), PendingIntent.FLAG_IMMUTABLE
         )
-        manager.notify(1, Notification.Builder(this, "test")
+        val preview = "This is a deliberately longer test notification. SakuraIsland should show several lines " +
+            "of this message inside a compact card, without an extra Xiaomi heads-up banner " +
+            "when Replace Xiaomi pop-up banners is enabled. Tap Open to return to SakuraIsland."
+        manager.notify(1, Notification.Builder(this, channel)
             .setSmallIcon(R.drawable.ic_sakura)
-            .setContentTitle("SakuraIsland test")
-            .setContentText("SystemUI should render the notification if enabled and allowed.")
+            .setContentTitle("SakuraIsland preview test")
+            .setContentText(preview)
+            .setStyle(Notification.BigTextStyle().bigText(preview))
             .setContentIntent(open).setAutoCancel(true).build())
     }
 }
