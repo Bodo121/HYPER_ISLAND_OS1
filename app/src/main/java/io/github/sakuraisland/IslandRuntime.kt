@@ -90,6 +90,7 @@ class IslandRuntime(val host: View) {
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) { safe {
             when (i.action) {
+                NotificationManager.ACTION_INTERRUPTION_FILTER_CHANGED -> refreshDndState()
                 Intent.ACTION_SCREEN_OFF -> { expanded = false; hide() }
                 Intent.ACTION_USER_PRESENT, Intent.ACTION_CONFIGURATION_CHANGED, Intent.ACTION_SCREEN_ON -> { expanded = false; redraw() }
                 Intent.ACTION_BATTERY_CHANGED -> {
@@ -116,6 +117,34 @@ class IslandRuntime(val host: View) {
     }
     private var wasCharging = false
     private var lastBatteryLevel = -1
+    private val notificationManager by lazy { context.getSystemService(NotificationManager::class.java) }
+    private var lastZenMode: Int? = null
+    /** DND state change is a system status event, not an ordinary app notification. */
+    fun refreshDndState() { safe {
+        val mode = notificationManager?.currentInterruptionFilter ?: return@safe
+        val previous = lastZenMode
+        lastZenMode = mode
+        if(previous == null || previous == mode || !enabled("enabled")) return@safe
+        val active = mode != NotificationManager.INTERRUPTION_FILTER_ALL
+        val label = if(active) "Do Not Disturb is on" else "Do Not Disturb is off"
+        events["zen"] = IslandEvent("zen", label,
+            if(active) "Notifications are silenced by your system settings" else "Normal alerts restored",
+            95, expires=SystemClock.elapsedRealtime()+3500L,kind="system")
+        autoExpandKey="zen"
+        redraw()
+        Diagnostics.record("DND status reflected in island (active=$active)")
+    } }
+    /** Only replace an identified DND visual when our matching event is on-screen. */
+    fun replaceDndVisual(message: String): Boolean {
+        if (disposed || failed || !enabled("enabled") || !eligible()) return false
+        val msg=message.lowercase(java.util.Locale.ROOT).trim()
+        if (!(msg.contains("dnd") || msg.contains("do not disturb"))) return false
+        refreshDndState()
+        val item=events["zen"] ?: return false
+        return item.expires > SystemClock.elapsedRealtime() &&
+            currentKey == "zen" && attached && panel.isAttachedToWindow
+    }
+
     private fun dp(v: Int) = (v * context.resources.displayMetrics.density).toInt()
     private fun enabled(k: String) = options[k] == "true"
     private fun value(k: String, min: Int, max: Int) = (options[k]?.toIntOrNull() ?: Config.defaults[k]!!.toInt()).coerceIn(min, max)
@@ -138,9 +167,11 @@ class IslandRuntime(val host: View) {
             addAction(Intent.ACTION_SCREEN_OFF); addAction(Intent.ACTION_USER_PRESENT)
             addAction(Intent.ACTION_CONFIGURATION_CHANGED); addAction(Intent.ACTION_BATTERY_CHANGED)
             addAction(Intent.ACTION_SCREEN_ON)
+            addAction(NotificationManager.ACTION_INTERRUPTION_FILTER_CHANGED)
         }, Context.RECEIVER_NOT_EXPORTED)
         host.addOnLayoutChangeListener(layoutListener)
         loadConfig()
+        refreshDndState()
     }
     private val relayout = Runnable { safe { redraw() } }
     private val layoutListener = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
@@ -521,6 +552,7 @@ class IslandRuntime(val host: View) {
         val cameraOnly = compactWidth < cutoutWidth + dp(58)
         val width = when {
             expanded && event?.kind == "notification" -> minOf(dp(310), screenWidth - dp(32))
+            expanded && event?.kind == "system" -> maxOf(dp(144),compactHeight + dp(104))
             expanded && event?.kind == "charging" -> minOf(dp(292), screenWidth - dp(32))
             expanded && (event?.kind == "call" || event?.kind == "timer") -> minOf(dp(310), screenWidth - dp(32))
             expanded -> minOf(dp(330), screenWidth - dp(24))
