@@ -64,6 +64,7 @@ class SettingsActivity : AppCompatActivity() {
         section("Get started")
         note("Experimental hardware support: Android 14, taoyao, OS1.0.39.0.ULIEUXM. Enable in LSPosed with System UI as the only scope, then reboot.")
         toggle("enabled", "Enable SystemUI island", false)
+        toggle("idle", "Keep a pill around the camera when idle")
         section("Activities")
         toggle("media", "Music and media sessions")
         toggle("notifications", "Selected app notifications")
