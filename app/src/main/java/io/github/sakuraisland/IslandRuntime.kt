@@ -157,8 +157,7 @@ class IslandRuntime(val host: View) {
     fun posted(sbn: StatusBarNotification) { safe {
         val now = SystemClock.elapsedRealtime()
         if (!enabled("enabled")) return@safe
-        if (sbn.user != UserHandle.getUserHandleForUid(Process.myUid()) &&
-            sbn.user.identifier != -1) {
+        if (sbn.user != UserHandle.getUserHandleForUid(Process.myUid())) {
             Diagnostics.record("Notif ignored: different Android user (package=${sbn.packageName})")
             return@safe
         }
