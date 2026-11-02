@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.SakuraIsland" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">#A53860</item><item name="colorSecondary">#80536B</item>
+        <item name="android:fontFamily">sans</item><item name="android:windowLightStatusBar">?attr/isLightTheme</item>
+    </style>
+    <string-array name="xposed_scope"><item>com.android.systemui</item></string-array>
+</resources>

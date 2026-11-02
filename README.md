@@ -53,4 +53,3 @@ GitHub Actions builds and uploads the debug APK and reports. The manual release 
 - Runtime error isolation reduces risk but cannot guarantee prevention of SystemUI crashes or reboot loops.
 
 See [RESEARCH.md](RESEARCH.md), [ARCHITECTURE.md](ARCHITECTURE.md), [VALIDATION.md](VALIDATION.md) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-

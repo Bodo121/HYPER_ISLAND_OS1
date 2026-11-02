@@ -1,0 +1,23 @@
+package io.github.sakuraisland
+
+import org.junit.Assert.*
+import org.junit.Test
+
+class PolicyTest {
+    @Test fun callsPreemptMediaAndExpiryRestoresMedia() {
+        val events = listOf(EventRank("media", 40, 1, Long.MAX_VALUE), EventRank("call", 100, 2, 20))
+        assertEquals("call", Policy.select(events, 10)); assertEquals("media", Policy.select(events, 20))
+    }
+    @Test fun newestEqualPriorityWins() {
+        assertEquals("b", Policy.select(listOf(EventRank("a", 60, 1, 20), EventRank("b", 60, 2, 20)), 3))
+    }
+    @Test fun expiredAndEmptyAreHidden() {
+        assertNull(Policy.select(emptyList(), 0)); assertNull(Policy.select(listOf(EventRank("a", 1, 0, 10)), 10))
+    }
+    @Test fun exactTargetOnly() {
+        assertTrue(Policy.target(34, "taoyao", "OS1.0.39.0.ULIEUXM"))
+        assertFalse(Policy.target(35, "taoyao", "OS1.0.39.0.ULIEUXM"))
+        assertFalse(Policy.target(34, "other", "OS1.0.39.0.ULIEUXM"))
+        assertFalse(Policy.target(34, "taoyao", "OS1.0.38.0.ULIEUXM"))
+    }
+}
