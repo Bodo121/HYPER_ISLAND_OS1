@@ -101,27 +101,71 @@ class SystemUiHook : IXposedHookLoadPackage {
                 })
             } }
         })
-        // Observe native collection callbacks; never suppress or replace notification behavior.
-        val collection = XposedHelpers.findClassIfExists(candidates[5], loader)
+        // Observe both native collection delivery and its coalescer. Their callbacks
+        // may be used on different Xiaomi build paths. Runtime deduplicates by sbn.key.
+        // No native notification is suppressed: preserve system delivery until the
+        // island has been validated on-device for each notification source.
         var hooks = 0
-        collection?.declaredMethods?.filter {
-            val parameters = it.parameterTypes.toList()
-            val common = listOf(StatusBarNotification::class.java, android.service.notification.NotificationListenerService.RankingMap::class.java)
-            it.returnType == Void.TYPE && ((it.name == "onNotificationPosted" && parameters == common) ||
-                (it.name == "onNotificationRemoved" && parameters == common + Integer.TYPE))
+        val listenerNames = listOf(
+            "com.android.systemui.statusbar.notification.collection.NotifCollection\\$1",
+            "com.android.systemui.statusbar.notification.collection.coalescer.GroupCoalescer\\$1"
+        )
+        val postingSignature = listOf(
+            StatusBarNotification::class.java,
+            android.service.notification.NotificationListenerService.RankingMap::class.java
+        )
+        listenerNames.forEach { listenerName ->
+            val listener = XposedHelpers.findClassIfExists(listenerName, loader)
+            if (listener == null) {
+                Diagnostics.record("Notification listener unavailable: ${listenerName.substringAfterLast('.')}")
+            } else {
+                listener.declaredMethods.filter {
+                    it.returnType == Void.TYPE &&
+                        ((it.name == "onNotificationPosted" && it.parameterTypes.toList() == postingSignature) ||
+                        (it.name == "onNotificationRemoved" &&
+                            it.parameterTypes.toList() == postingSignature + Integer.TYPE))
+                }.forEach { method ->
+                    Diagnostics.guard("notification callback") {
+                        XposedBridge.hookMethod(method, object : XC_MethodHook() {
+                            override fun afterHookedMethod(param: MethodHookParam) {
+                                if (param.hasThrowable()) return
+                                val sbn = param.args.firstOrNull() as? StatusBarNotification ?: return
+                                Handler(Looper.getMainLooper()).post { Diagnostics.guard("notification delivery") {
+                                    if (method.name == "onNotificationPosted") runtime?.posted(sbn)
+                                    else runtime?.removed(sbn.key)
+                                } }
+                            }
+                        })
+                        hooks++
+                        Diagnostics.record("HOOK ${method.toGenericString()}")
+                    }
+                }
+            }
+        }
+        // Fallback for internally coalesced notifications that bypass the public
+        // listener callbacks on some Xiaomi builds. Signature validated against
+        // the installed MiuiSystemUI.apk method table.
+        val collectionImpl = XposedHelpers.findClassIfExists(
+            "com.android.systemui.statusbar.notification.collection.NotifCollection", loader)
+        collectionImpl?.declaredMethods?.filter {
+            it.name == "postNotification" && it.returnType == Void.TYPE &&
+                it.parameterTypes.toList() == listOf(StatusBarNotification::class.java,
+                    android.service.notification.NotificationListenerService.Ranking::class.java)
         }?.forEach { method ->
-            Diagnostics.guard("notification hook") {
+            Diagnostics.guard("notification fallback") {
                 XposedBridge.hookMethod(method, object : XC_MethodHook() {
                     override fun afterHookedMethod(param: MethodHookParam) {
                         if (param.hasThrowable()) return
-                        val sbn = param.args.firstOrNull() as? StatusBarNotification ?: return
-                        Handler(Looper.getMainLooper()).post { Diagnostics.guard("notification event") {
-                            if (method.name == "onNotificationPosted") runtime?.posted(sbn) else runtime?.removed(sbn.key)
+                        val sbn = param.args[0] as? StatusBarNotification ?: return
+                        Handler(Looper.getMainLooper()).post { Diagnostics.guard("notification fallback delivery") {
+                            runtime?.posted(sbn)
                         } }
                     }
-                }); hooks++; Diagnostics.record("HOOK ${method.toGenericString()}")
+                })
+                hooks++
+                Diagnostics.record("HOOK fallback ${method.toGenericString()}")
             }
         }
-        Diagnostics.record("Notification callbacks installed=$hooks; native heads-up retained")
+        Diagnostics.record("Notification observation callbacks installed=$hooks; native heads-up preserved")
     }
 }
