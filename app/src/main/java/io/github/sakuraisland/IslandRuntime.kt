@@ -270,7 +270,10 @@ class IslandRuntime(val host: View) {
         // If the collection listener hasn't posted yet, handle it now.
         // Never suppress unless a real island event actually wins priority
         // and an island view is attached to the visible SystemUI host.
-        if (events[sbn.key] == null) posted(sbn)
+        // Re-apply even when the notification key already exists: WhatsApp and
+        // similar apps update one notification for multiple incoming messages.
+        // posted() deduplicates near-simultaneous callbacks safely.
+        posted(sbn)
         val now = SystemClock.elapsedRealtime()
         val candidate = events[sbn.key]
         if (candidate?.kind != "notification" || candidate.expires <= now ||
