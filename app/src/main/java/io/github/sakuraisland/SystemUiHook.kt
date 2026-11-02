@@ -104,28 +104,30 @@ class SystemUiHook : IXposedHookLoadPackage {
         // Xiaomi's installed native strong-toast manager exposes getSupportCharge(MiuiBatteryStatus).
         // Observe its *return value only*; never instantiate or replace the OEM manager.
         // Hooking is best-effort and safely skipped on other ROMs/class loaders.
-        XposedHelpers.findClassIfExists("com.android.systemui.toast.MIUIStrongToastControl", loader)
-            ?.declaredMethods?.filter { method ->
-                method.name == "getSupportCharge" &&
-                    method.parameterTypes.size == 1 &&
-                    method.parameterTypes[0].name == "com.miui.charge.MiuiBatteryStatus" &&
-                    method.returnType == String::class.java
-            }?.forEach { method ->
-                Diagnostics.guard("native charge mode observer") {
-                    XposedBridge.hookMethod(method, object : XC_MethodHook() {
-                        override fun afterHookedMethod(param: MethodHookParam) {
-                            if (param.hasThrowable()) return
-                            val hint = param.result as? String ?: return
-                            Handler(Looper.getMainLooper()).post {
-                                Diagnostics.guard("native charge mode") {
-                                    runtime?.nativeChargingMode(hint)
+        Diagnostics.guard("OEM charging observer setup") {
+            XposedHelpers.findClassIfExists("com.android.systemui.toast.MIUIStrongToastControl", loader)
+                ?.declaredMethods?.filter { method ->
+                    method.name == "getSupportCharge" &&
+                        method.parameterTypes.size == 1 &&
+                        method.parameterTypes[0].name == "com.miui.charge.MiuiBatteryStatus" &&
+                        method.returnType == String::class.java
+                }?.forEach { method ->
+                    Diagnostics.guard("native charge mode observer") {
+                        XposedBridge.hookMethod(method, object : XC_MethodHook() {
+                            override fun afterHookedMethod(param: MethodHookParam) {
+                                if (param.hasThrowable()) return
+                                val hint = param.result as? String ?: return
+                                Handler(Looper.getMainLooper()).post {
+                                    Diagnostics.guard("native charge mode") {
+                                        runtime?.nativeChargingMode(hint)
+                                    }
                                 }
                             }
-                        }
-                    })
-                    Diagnostics.record("Observed Xiaomi charging mode getter (read-only)")
+                        })
+                        Diagnostics.record("Observed Xiaomi charging mode getter (read-only)")
+                    }
                 }
-            }
+        }
         // Observe both native collection delivery and its coalescer. Their callbacks
         // may be used on different Xiaomi build paths. Runtime deduplicates by sbn.key.
         // No native notification is suppressed: preserve system delivery until the
