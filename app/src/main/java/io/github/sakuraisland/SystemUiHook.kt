@@ -170,8 +170,8 @@ class SystemUiHook : IXposedHookLoadPackage {
         }
         // Observe both native collection delivery and its coalescer. Their callbacks
         // may be used on different Xiaomi build paths. Runtime deduplicates by sbn.key.
-        // No native notification is suppressed: preserve system delivery until the
-        // island has been validated on-device for each notification source.
+        // Native collection delivery is never suppressed. Only later visual
+        // heads-up decisions may be replaced after a matching island is visible.
         var hooks = 0
         val listenerNames = listOf(
             "com.android.systemui.statusbar.notification.collection.NotifCollection\$1",
