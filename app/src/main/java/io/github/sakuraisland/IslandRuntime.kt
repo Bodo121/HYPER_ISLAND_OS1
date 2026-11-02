@@ -36,6 +36,7 @@ class IslandRuntime(val host: View) {
     private var failed = false
     private var errors = 0
     private var currentKey: String? = null
+    private var autoExpandKey: String? = null
     private var animator: ValueAnimator? = null
     private val hiddenIcons = linkedMapOf<View, Float>()
     private val panel = LinearLayout(context).apply {
@@ -201,6 +202,7 @@ class IslandRuntime(val host: View) {
             appIcon = runCatching { context.packageManager.getApplicationIcon(sbn.packageName) }.getOrNull()
                 ?: runCatching { n.smallIcon?.loadDrawable(context) }.getOrNull())
         while (events.size > 32) events.remove(events.keys.firstOrNull { it != "media" } ?: break)
+        if (enabled("auto_expand_notifications") && !call && !timer) autoExpandKey = id
         Diagnostics.record("Notif accepted: package=${sbn.packageName} type=${if(call) "call" else if(timer) "timer" else "alert"} eligible=${eligible()}")
         Diagnostics.publish(context)
         redraw()
@@ -244,7 +246,17 @@ class IslandRuntime(val host: View) {
         if (!eligible() || (event == null && !enabled("idle"))) {
             currentKey = null; expanded = false; hide(); return
         }
-        if (currentKey != key) { expanded = false; currentKey = key }
+        if (currentKey != key) {
+            expanded = key != null && key == autoExpandKey
+            currentKey = key
+        }
+        // A new app alert should be visible as an expanded card, not just a dot
+        // hidden next to the camera. Auto-collapse after a short reading window.
+        if (key != null && key == autoExpandKey && expanded) {
+            autoExpandKey = null
+            main.removeCallbacks(collapse)
+            main.postDelayed(collapse, 4500L)
+        }
         if (event != null) {
             val nextExpiry = events.values.minOfOrNull { it.expires } ?: Long.MAX_VALUE
             if (nextExpiry != Long.MAX_VALUE) main.postDelayed(expiry, (nextExpiry - now).coerceAtLeast(1))
