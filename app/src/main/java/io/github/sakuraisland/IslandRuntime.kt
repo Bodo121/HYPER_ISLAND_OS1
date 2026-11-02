@@ -157,7 +157,7 @@ class IslandRuntime(val host: View) {
         val nextExpiry = events.values.minOf { it.expires }
         if (nextExpiry != Long.MAX_VALUE) main.postDelayed(expiry, (nextExpiry - now).coerceAtLeast(1))
         buildContent(event)
-        val cutout = host.rootWindowInsets?.displayCutout?.boundingRects?.firstOrNull { it.top == 0 }
+        val cutout = host.rootWindowInsets?.displayCutout?.boundingRectTop?.takeUnless { it.isEmpty }
         val screenWidth = context.resources.displayMetrics.widthPixels
         params.x = if (cutout != null) cutout.centerX() - screenWidth / 2 else 0
         val compactHeight = maxOf(dp(value("height", 28, 52)), (cutout?.height() ?: 0) + dp(4))
@@ -258,3 +258,4 @@ class IslandRuntime(val host: View) {
         context.contentResolver.unregisterContentObserver(observer); events.clear()
     }
 }
+
