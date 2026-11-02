@@ -49,6 +49,7 @@ class SystemUiHook : IXposedHookLoadPackage {
         Diagnostics.record("ro.mi.os.version.name=$name")
         Diagnostics.record("ro.mi.os.version.incremental=$incremental")
         Diagnostics.record("ro.build.version.incremental=${Build.VERSION.INCREMENTAL}")
+        Diagnostics.record("Dolby DAX hardware property=${property("ro.vendor.audio.dolby.dax.support").ifBlank { "unavailable" }}")
         val candidates = listOf("com.android.systemui.statusbar.phone.PhoneStatusBarView",
             "com.android.systemui.statusbar.window.StatusBarWindowController",
             "com.android.systemui.statusbar.phone.StatusBar", "com.android.systemui.statusbar.phone.CentralSurfacesImpl",
