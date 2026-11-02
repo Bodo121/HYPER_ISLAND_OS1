@@ -53,7 +53,6 @@ class IslandRuntime(val host: View) {
     private var currentKey: String? = null
     private var autoExpandKey: String? = null
     private var selectedNotificationKey: String? = null
-    private var lastDrawKey: String? = null
     private var animator: ValueAnimator? = null
     private val hiddenIcons = linkedMapOf<View, Float>()
     private val panel = LinearLayout(context).apply {
@@ -345,8 +344,7 @@ class IslandRuntime(val host: View) {
             !enabled("replace_charge_toast") || !enabled("charging") || !wasCharging ||
             chargeLabel.isBlank() || !eligible()) return false
         val original = events["battery"] ?: return false
-        val calibrated = if(lastBatteryLevel >= 0 && oemLevel in 1f..100f &&
-            kotlin.math.abs(oemLevel - lastBatteryLevel) < 3f) {
+        val calibrated = if(Policy.validOemBatteryLevel(oemLevel, lastBatteryLevel)) {
             java.lang.String.format(java.util.Locale.US, "%.2f", oemLevel) + "%"
         } else null
         val label = calibrated ?: if(lastBatteryLevel >= 0) "$lastBatteryLevel%" else "Charging"
@@ -375,8 +373,7 @@ class IslandRuntime(val host: View) {
         val items = pendingNotifications()
         if (items.size < 2) return
         val current = selectedNotificationKey ?: currentKey
-        val index = items.indexOfFirst { it.key == current }
-        selectedNotificationKey = items[(index + 1).coerceAtLeast(0) % items.size].key
+        selectedNotificationKey = Policy.nextAlertKey(items.map { it.key }, current)
         autoExpandKey = selectedNotificationKey
         redraw()
     }
