@@ -26,6 +26,17 @@ class PolicyTest {
     @Test fun expiredAndEmptyAreHidden() {
         assertNull(Policy.select(emptyList(), 0)); assertNull(Policy.select(listOf(EventRank("a", 1, 0, 10)), 10))
     }
+    @Test fun allAppsCoversNormalAppNotifications() {
+        assertTrue(Policy.allowNotificationPackage("com.google.android.apps.messaging", true, "com.whatsapp"))
+        assertTrue(Policy.allowNotificationPackage("com.whatsapp", true, ""))
+        assertFalse(Policy.allowNotificationPackage("", true, ""))
+    }
+    @Test fun packageFilterUsesExactIdsNotSubstrings() {
+        assertTrue(Policy.allowNotificationPackage("org.telegram.messenger", false, "com.whatsapp, org.telegram.messenger"))
+        assertFalse(Policy.allowNotificationPackage("org.telegram.messenger.fake", false, "org.telegram.messenger"))
+        assertFalse(Policy.allowNotificationPackage("com.google.android.apps.messaging", false, "com.whatsapp"))
+        assertFalse(Policy.allowNotificationPackage("com.whatsapp", false, ""))
+    }
     @Test fun exactTargetOnly() {
         assertTrue(Policy.target(34, "taoyao", "OS1.0.39.0.ULIEUXM"))
         assertFalse(Policy.target(35, "taoyao", "OS1.0.39.0.ULIEUXM"))
