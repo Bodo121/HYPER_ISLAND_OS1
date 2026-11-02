@@ -223,7 +223,7 @@ fun SakuraSettingsScreen(
                 SectionHeader("Activities")
                 GlassCard {
                     listOf(Triple("media","Music sessions","Albums, playback and controls"),
-                        Triple("notifications","Notifications","Selected app messages and alerts"),
+                        Triple("notifications","Notifications","Eligible app messages and alerts"),
                         Triple("calls","Calls","Incoming or missed call notices"),
                         Triple("timers","Timers and alarms","Notifications published by timer apps"),
                         Triple("charging","Charging","Real battery percentage")).forEachIndexed { idx, (k, t, d) ->
@@ -270,10 +270,12 @@ fun SakuraSettingsScreen(
                 }
             }
             item {
-                SectionHeader("Notification apps")
+                SectionHeader("Notification apps", "Allow all apps or restrict alerts to the package IDs below.")
                 GlassCard {
+                    ConfigToggle("All apps", "Show eligible alerts from every installed application", enabled("all_apps")) { set("all_apps",it.toString()) }
+                    HorizontalDivider(color = Hairline, modifier = Modifier.padding(vertical = 8.dp))
                     OutlinedTextField(value = apps, onValueChange = { apps = it.take(1024) },
-                        label = { Text("Comma-separated package IDs") }, minLines = 2, maxLines = 4,
+                        label = { Text("Package filter (used when All apps is off)") }, minLines = 2, maxLines = 4,
                         modifier = Modifier.fillMaxWidth(), textStyle = LocalTextStyle.current.copy(fontSize = 12.sp),
                         colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Sakura, focusedLabelColor = Sakura))
                     Spacer(Modifier.height(8.dp))
