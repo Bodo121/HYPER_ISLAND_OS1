@@ -122,11 +122,13 @@ class IslandRuntime(val host: View) {
     private var lastZenMode: Int? = null
     private val audioManager by lazy { context.getSystemService(android.media.AudioManager::class.java) }
     private var lastRingerMode: Int? = null
+    private var lastSoundTransitionAt = 0L
     fun refreshRingerState() { safe {
         val mode = audioManager?.ringerMode ?: return@safe
         val previous = lastRingerMode
         lastRingerMode = mode
         if (previous == null || previous == mode || !enabled("enabled")) return@safe
+        lastSoundTransitionAt=SystemClock.elapsedRealtime()
         val label = when(mode) {
             android.media.AudioManager.RINGER_MODE_SILENT -> "Silent mode"
             android.media.AudioManager.RINGER_MODE_VIBRATE -> "Vibrate mode"
@@ -145,6 +147,7 @@ class IslandRuntime(val host: View) {
         val previous = lastZenMode
         lastZenMode = mode
         if(previous == null || previous == mode || !enabled("enabled")) return@safe
+        lastSoundTransitionAt=SystemClock.elapsedRealtime()
         val active = mode != NotificationManager.INTERRUPTION_FILTER_ALL
         val label = if(active) "Do Not Disturb is on" else "Do Not Disturb is off"
         events["zen"] = IslandEvent("zen", label,
@@ -170,7 +173,8 @@ class IslandRuntime(val host: View) {
      * presentation boundary. The underlying volume/DND state is untouched.
      */
     fun onXiaomiSoundPopup(): Boolean {
-        if (disposed || failed || !enabled("enabled") || !eligible()) return false
+        if (disposed || failed || !enabled("enabled") || !eligible() ||
+            SystemClock.elapsedRealtime()-lastSoundTransitionAt > 1800L) return false
         val zen=notificationManager?.currentInterruptionFilter ?: NotificationManager.INTERRUPTION_FILTER_ALL
         val ringer=audioManager?.ringerMode ?: android.media.AudioManager.RINGER_MODE_NORMAL
         val dnd=zen != NotificationManager.INTERRUPTION_FILTER_ALL
