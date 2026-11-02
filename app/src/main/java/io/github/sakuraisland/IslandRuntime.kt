@@ -199,7 +199,8 @@ class IslandRuntime(val host: View) {
             now, now + if (call || timer) 30000 else 8500,
             n.contentIntent, dismissible = sbn.isClearable && !call && !timer,
             kind = if (call) "call" else if (timer) "timer" else "notification",
-            appIcon = runCatching { n.smallIcon?.loadDrawable(context) }.getOrNull())
+            appIcon = runCatching { context.packageManager.getApplicationIcon(sbn.packageName) }.getOrNull()
+                ?: runCatching { n.smallIcon?.loadDrawable(context) }.getOrNull())
         while (events.size > 32) events.remove(events.keys.firstOrNull { it != "media" } ?: break)
         Diagnostics.record("Notif accepted: package=${sbn.packageName} type=${if(call) "call" else if(timer) "timer" else "alert"} eligible=${eligible()}")
         Diagnostics.publish(context)
@@ -210,6 +211,28 @@ class IslandRuntime(val host: View) {
         events.remove(key)
         redraw()
     } }
+    /**
+     * OEM charging hook calls this with a Xiaomi-supported charging label.
+     * Read-only: neither writes to power supply nor guesses live charger watts.
+     */
+    fun nativeChargingMode(raw: String) { safe {
+        if (!wasCharging || !enabled("charging")) return@safe
+        val label = raw.take(64).trim()
+        if (label.isEmpty()) return@safe
+        val fast = listOf("turbo", "hyper", "super", "quick", "67w").any {
+            label.contains(it, ignoreCase = true)
+        }
+        Diagnostics.record("Xiaomi charging API observed, fastModeHint=$fast")
+        Diagnostics.publish(context)
+        if (fast) {
+            val e = events["battery"] ?: return@safe
+            if (!e.text.contains("Turbo charging")) {
+                events["battery"] = e.copy(text = "${e.text} · Turbo charging")
+                redraw()
+            }
+        }
+    } }
+
     private fun eligible() = enabled("enabled") && power.isInteractive && !keyguard.isKeyguardLocked &&
         host.isAttachedToWindow && host.isShown && context.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT
     private fun redraw() {
