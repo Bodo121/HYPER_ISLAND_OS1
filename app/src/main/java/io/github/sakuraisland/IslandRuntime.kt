@@ -175,17 +175,19 @@ class IslandRuntime(val host: View) {
         val n = sbn.notification
         if (n.flags and Notification.FLAG_GROUP_SUMMARY != 0 || n.visibility == Notification.VISIBILITY_SECRET) {
             Diagnostics.record("Notif ignored: summary or secret, package=${sbn.packageName}")
+            Diagnostics.publish(context)
             return@safe
         }
         val call = n.category == Notification.CATEGORY_CALL || n.category == Notification.CATEGORY_MISSED_CALL
         val timer = n.category == Notification.CATEGORY_ALARM || n.category == Notification.CATEGORY_STOPWATCH
         if (n.category == Notification.CATEGORY_TRANSPORT) return@safe
         if (!call && !timer && n.flags and Notification.FLAG_FOREGROUND_SERVICE != 0) return@safe
-        val allowed = enabled("all_apps") || options["apps"].orEmpty().split(',').map { it.trim() }
-            .contains(sbn.packageName)
+        val allowed = Policy.allowNotificationPackage(sbn.packageName, enabled("all_apps"),
+            options["apps"].orEmpty())
         if ((call && !enabled("calls")) || (timer && !enabled("timers")) ||
             (!call && !timer && (!enabled("notifications") || !allowed))) {
             Diagnostics.record("Notif filtered by settings: ${sbn.packageName}")
+            Diagnostics.publish(context)
             return@safe
         }
         val heading = n.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.take(120)
@@ -201,6 +203,7 @@ class IslandRuntime(val host: View) {
             appIcon = runCatching { n.smallIcon?.loadDrawable(context) }.getOrNull())
         while (events.size > 32) events.remove(events.keys.firstOrNull { it != "media" } ?: break)
         Diagnostics.record("Notif accepted: package=${sbn.packageName} type=${if(call) "call" else if(timer) "timer" else "alert"} eligible=${eligible()}")
+        Diagnostics.publish(context)
         redraw()
     } }
     fun removed(key: String) { safe {
