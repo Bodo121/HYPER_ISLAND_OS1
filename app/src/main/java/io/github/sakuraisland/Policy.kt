@@ -21,5 +21,21 @@ object Policy {
         ((line.length + 30) / 31).coerceAtLeast(1)
     }.coerceIn(1,4)
 
+    /** Pixel-space camera safety; text never occupies the measured physical lens region. */
+    fun compactSideWidth(totalPx: Int, cameraWidthPx: Int, marginPx: Int): Int =
+        ((totalPx - cameraWidthPx - 2 * marginPx).coerceAtLeast(0)) / 2
+
+    /** Bounded and predictable height for a content-sized notification panel. */
+    fun alertCardHeightDp(lines: Int, cameraClearanceDp: Int, withActions: Boolean): Int {
+        val textHeight = 28 + lines.coerceIn(1, 6) * 19
+        return (cameraClearanceDp + 34 + maxOf(44, textHeight) +
+            (if (withActions) 48 else 12) + 14).coerceIn(126, 320)
+    }
+
+    /** Critical/ongoing events are never eligible for native heads-up suppression. */
+    fun mayReplaceHeadsUp(kind: String, hasFullScreenIntent: Boolean,
+                          clearable: Boolean, isOngoing: Boolean, secret: Boolean): Boolean =
+        kind == "notification" && !hasFullScreenIntent && clearable && !isOngoing && !secret
+
     fun dimension(value: Int, min: Int, max: Int) = value.coerceIn(min, max)
 }
