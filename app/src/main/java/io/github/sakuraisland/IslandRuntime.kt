@@ -537,7 +537,7 @@ class IslandRuntime(val host: View) {
             }
             expanded && event?.kind == "charging" -> maxOf(dp(156), compactHeight + dp(116))
             expanded && (event?.kind == "call" || event?.kind == "timer") -> maxOf(dp(190), compactHeight + dp(140))
-            expanded && event?.kind == "media" -> maxOf(dp(218), compactHeight + dp(181))
+            expanded && event?.kind == "media" -> maxOf(dp(244), compactHeight + dp(203))
             expanded -> maxOf(dp(232), compactHeight + dp(185))
             event == null || cameraOnly -> idleHeight
             else -> compactHeight
