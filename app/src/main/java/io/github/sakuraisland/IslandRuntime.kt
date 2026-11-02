@@ -197,15 +197,23 @@ class IslandRuntime(val host: View) {
         params.y = ((cutout?.top ?: dp(5)) + dp(value("offset", -4, 24))).coerceAtLeast(0)
         val cutoutWidth = (cutout?.width() ?: dp(12)) + dp(12)
         val compactHeight = maxOf(dp(value("height", 28, 52)), (cutout?.bottom ?: 0) - params.y + dp(5))
+        // Distinct idle capsule sizing: never reuse the physical cutout diameter as pill width.
+        // The image reference is a horizontal ~3:1 capsule, not a circular notch mask.
+        val idleHeight = maxOf(dp(value("idle_height", 28, 44)), (cutout?.bottom ?: 0) - params.y + dp(4))
         val safeWidth = safeCompactWidth(centerX, screenWidth).coerceAtLeast(cutoutWidth)
+        val idleWidth = minOf(maxOf(dp(value("idle_width", 72, 132)), cutoutWidth + dp(8)), safeWidth)
         val compactWidth = minOf(maxOf(dp(value("width", 120, 240)), cutoutWidth + dp(58)), safeWidth)
         val cameraOnly = compactWidth < cutoutWidth + dp(58)
         val width = when {
             expanded -> minOf(dp(352), screenWidth - dp(18))
-            event == null -> minOf(maxOf(dp(40), cutoutWidth), safeWidth)
-            else -> if (cameraOnly) maxOf(dp(40), cutoutWidth) else compactWidth
+            event == null || cameraOnly -> idleWidth
+            else -> compactWidth
         }
-        val height = if (expanded) maxOf(dp(268), compactHeight + dp(215)) else compactHeight
+        val height = when {
+            expanded -> maxOf(dp(268), compactHeight + dp(215))
+            event == null || cameraOnly -> idleHeight
+            else -> compactHeight
+        }
 
         params.flags = params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
         if (event == null) {
