@@ -128,14 +128,15 @@ internal class IslandVisuals(private val context: Context, private val panel: Li
      * card beginning below the status row. Outside the cap the top corners are transparent.
      */
     fun render(e: IslandEvent, expanded: Boolean, topClearancePx: Int, cameraCapPx: Int,
-               compactHeightPx: Int, chroma: Boolean, motion: Boolean, action: (String) -> Unit) {
+               compactHeightPx: Int, chroma: Boolean, motion: Boolean, alertLines: Int,
+               queueCount: Int, action: (String) -> Unit) {
         player = e.media
         durationMs = e.media?.metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION)?.coerceAtLeast(0L) ?: 0L
         mediaProgress = null; timeLabel = null; durationLabel = null; dragging = false
         panel.removeAllViews()
-        panel.setPadding(dp(if (expanded) 15 else 10),
-            if (expanded) maxOf(topClearancePx, dp(if(e.kind=="notification") 37 else 43)) else dp(2),
-            dp(if (expanded) 15 else 10), dp(if (expanded) 9 else 3))
+        panel.setPadding(if (expanded) dp(15) else 0,
+            if (expanded) maxOf(topClearancePx + dp(4), dp(40)) else 0,
+            if (expanded) dp(15) else 0, if (expanded) dp(10) else 0)
         panel.gravity = if (expanded) Gravity.TOP else Gravity.CENTER_VERTICAL
         panel.clipToOutline = false
         val accent = when(e.kind) {
@@ -149,30 +150,52 @@ internal class IslandVisuals(private val context: Context, private val panel: Li
         panel.background = IslandShape(expanded, cameraCapPx, compactHeightPx.coerceAtLeast(dp(34)), accent, dp(28), dp(22))
 
         if (expanded && e.kind == "notification") {
-            renderAlert(e, accent, action)
-            panel.contentDescription = "${e.title}, notification preview. Open notification to read full message."
+            renderAlert(e, accent, alertLines, queueCount, action)
+            panel.contentDescription = "${e.title}, notification preview; tap Open for full message."
+            return
+        }
+        if (expanded && e.kind == "charging") {
+            renderCharging(e, accent, action)
+            return
+        }
+        if (expanded && (e.kind == "call" || e.kind == "timer")) {
+            renderActivity(e, accent, action)
             return
         }
 
         if (!expanded) {
-            val row = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
-            row.addView(image(e,24,7))
-            // Physical camera remains visually unobstructed in this reserved center gap.
-            row.addView(Space(context), LinearLayout.LayoutParams(0,1,1f))
-            row.addView(if (e.kind == "media") {
+            // Three absolute zones: left icon | actual camera lens + buffer | right data.
+            // No weighted Space that can shrink on long charging percentage strings.
+            val row = FrameLayout(context)
+            val safeCorner = dp(10)
+            val screen = context.resources.displayMetrics.widthPixels
+            val available = panel.layoutParams?.width?.takeIf { it > 0 && it < screen }
+                ?: dp(184)
+            val side = Policy.compactSideWidth(available, cameraCapPx, safeCorner)
+            val iconPx = minOf(dp(24), side.coerceAtLeast(dp(14)))
+            val left = image(e,24,8)
+            row.addView(left, FrameLayout.LayoutParams(iconPx,iconPx,Gravity.START or Gravity.CENTER_VERTICAL).apply {
+                leftMargin = dp(9)
+            })
+            val right = if (e.kind == "media") {
                 EqualizerView(context).apply {
                     isPlaying = e.media?.playbackState?.state == PlaybackState.STATE_PLAYING
-                    tint = if (chroma) mix(accent, white, .45f) else sakura
+                    tint = if (chroma) mix(accent, white, .5f) else sakura
                     animateBars = motion
                 }
             } else text(when(e.kind) {
-                "charging" -> if (android.os.Build.DEVICE == "taoyao") "67W MAX" else e.text
+                "charging" -> e.text.substringBefore('%').trim().takeLast(3) + "%"
                 "call" -> "Call"
                 "timer" -> "Timer"
-                else -> "●"
-            },12f,if(e.kind=="charging") Color.rgb(105,255,163) else white),
-                LinearLayout.LayoutParams(dp(if(e.kind=="charging") 68 else 36), dp(24)))
-            panel.addView(row, LinearLayout.LayoutParams(-1, dp(30)))
+                else -> "•"
+            },12f,if(e.kind=="charging") Color.rgb(105,255,163) else white,true).apply {
+                gravity = Gravity.END or Gravity.CENTER_VERTICAL
+            }
+            val rightSize = minOf(side,dp(if(e.kind=="charging") 54 else 32)).coerceAtLeast(dp(12))
+            row.addView(right,FrameLayout.LayoutParams(rightSize,dp(25),Gravity.END or Gravity.CENTER_VERTICAL).apply {
+                rightMargin=dp(9)
+            })
+            panel.addView(row, LinearLayout.LayoutParams(-1, compactHeightPx))
         } else {
             val eyebrow = text(when(e.kind) {
                 "media" -> "NOW PLAYING"
@@ -258,12 +281,22 @@ internal class IslandVisuals(private val context: Context, private val panel: Li
     }
 
     /** Compact notification card: full multi-line preview, no media timeline or empty playback area. */
-    private fun renderAlert(e: IslandEvent, accent: Int, action: (String) -> Unit) {
-        val eyebrow = text("NEW NOTIFICATION", 10f, mix(accent,white,.50f), true).apply {
-            letterSpacing = .12f
+    private fun renderAlert(e: IslandEvent, accent: Int, alertLines: Int, queueCount: Int, action: (String) -> Unit) {
+        val top = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
+        val eyebrow = text("NOTIFICATION", 9.5f, mix(accent,white,.48f), true).apply {
+            letterSpacing = .13f
         }
-        panel.addView(eyebrow, LinearLayout.LayoutParams(-1,dp(16)))
-        val row = LinearLayout(context).apply { gravity = Gravity.TOP }
+        top.addView(eyebrow, LinearLayout.LayoutParams(0,dp(16),1f))
+        if (queueCount > 1) {
+            top.addView(text("$queueCount alerts · Next",10.5f,secondary).apply {
+                gravity=Gravity.END or Gravity.CENTER_VERTICAL
+                isClickable=true; isFocusable=true
+                setOnClickListener { action("queue_next") }
+                contentDescription="Next notification; $queueCount pending alerts"
+            },LinearLayout.LayoutParams(-2,dp(26)))
+        }
+        panel.addView(top, LinearLayout.LayoutParams(-1,dp(18)))
+        val row = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
         row.addView(image(e,44,12),LinearLayout.LayoutParams(dp(44),dp(44)))
         val content = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -271,17 +304,18 @@ internal class IslandVisuals(private val context: Context, private val panel: Li
         }
         val sender = text(e.title,14.5f,white,true).apply {
             maxLines = 1; ellipsize = TextUtils.TruncateAt.END
+            gravity=Gravity.START or Gravity.CENTER_VERTICAL
         }
-        content.addView(sender,LinearLayout.LayoutParams(-1,dp(22)))
-        val preview = text(e.text,12.7f,secondary).apply {
-            maxLines = 4
+        content.addView(sender,LinearLayout.LayoutParams(-1,dp(23)))
+        val preview = text(e.text,13f,secondary).apply {
+            maxLines = alertLines.coerceIn(2,6)
             ellipsize = TextUtils.TruncateAt.END
-            gravity = Gravity.TOP
-            setLineSpacing(dp(2).toFloat(),1f)
+            gravity = Gravity.TOP or Gravity.START
+            setLineSpacing(dp(1).toFloat(),1.06f)
         }
         content.addView(preview,LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(2) })
         row.addView(content,LinearLayout.LayoutParams(0,-2,1f).apply { marginStart=dp(12) })
-        panel.addView(row,LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(9) })
+        panel.addView(row,LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(7) })
         val actions = LinearLayout(context).apply {
             gravity = Gravity.CENTER_VERTICAL or Gravity.END
         }
@@ -312,7 +346,58 @@ internal class IslandVisuals(private val context: Context, private val panel: Li
         }
         if(e.intent != null) actionChip("Open", e.actions.isEmpty()) { action("open") }
         actionChip("Close",false) { action("collapse") }
-        panel.addView(actions,LinearLayout.LayoutParams(-1,dp(36)).apply { topMargin=dp(11) })
+        panel.addView(actions,LinearLayout.LayoutParams(-1,dp(36)).apply { topMargin=dp(8) })
+    }
+
+    /** Native Xiaomi charge mode is informational; never assume real-time 67 W. */
+    private fun renderCharging(e: IslandEvent, accent: Int, action: (String) -> Unit) {
+        val head = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
+        head.addView(text("CHARGING",10f,Color.rgb(122,248,180),true).apply { letterSpacing=.12f },
+            LinearLayout.LayoutParams(0,dp(19),1f))
+        head.addView(text("UP TO 67 W",9.5f,secondary,true),LinearLayout.LayoutParams(-2,dp(19)))
+        panel.addView(head, LinearLayout.LayoutParams(-1,dp(19)))
+        val body = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
+        body.addView(image(e,39,11),LinearLayout.LayoutParams(dp(39),dp(39)))
+        val data=LinearLayout(context).apply { orientation=LinearLayout.VERTICAL; gravity=Gravity.CENTER_VERTICAL }
+        data.addView(text(e.text.substringBefore("·").trim(),20f,white,true),
+            LinearLayout.LayoutParams(-1,dp(27)))
+        data.addView(text(if (e.text.contains("Turbo",true)) "Turbo charge mode detected" else "Charging connected",
+            11.5f,secondary),LinearLayout.LayoutParams(-1,dp(18)))
+        body.addView(data,LinearLayout.LayoutParams(0,dp(46),1f).apply { marginStart=dp(12) })
+        panel.addView(body,LinearLayout.LayoutParams(-1,dp(50)).apply { topMargin=dp(8) })
+        panel.contentDescription="Battery charging: ${e.text}; hardware supports up to 67 watts"
+    }
+
+    /** Calls and timers use real notification actions, never fake call-answer buttons. */
+    private fun renderActivity(e: IslandEvent, accent: Int, action: (String) -> Unit) {
+        panel.addView(text(if(e.kind=="call") "CALL" else "TIMER / ALARM",
+            10f,mix(accent,white,.45f),true),LinearLayout.LayoutParams(-1,dp(19)))
+        val row=LinearLayout(context).apply { gravity=Gravity.CENTER_VERTICAL }
+        row.addView(image(e,44,12))
+        val details=LinearLayout(context).apply { orientation=LinearLayout.VERTICAL; gravity=Gravity.CENTER_VERTICAL }
+        details.addView(text(e.title,15.5f,white,true),LinearLayout.LayoutParams(-1,dp(24)))
+        details.addView(text(e.text,12.5f,secondary),LinearLayout.LayoutParams(-1,dp(22)))
+        row.addView(details,LinearLayout.LayoutParams(0,dp(49),1f).apply { marginStart=dp(12) })
+        panel.addView(row,LinearLayout.LayoutParams(-1,dp(54)).apply { topMargin=dp(6) })
+        val actions=LinearLayout(context).apply { gravity=Gravity.END or Gravity.CENTER_VERTICAL }
+        e.actions.take(2).forEachIndexed { i, a ->
+            val b=TextView(context).apply {
+                text=a.title; textSize=12f; setTextColor(white); gravity=Gravity.CENTER
+                maxLines=1; ellipsize=TextUtils.TruncateAt.END; isClickable=true; isFocusable=true
+                background=rounded(mix(accent,Color.BLACK,.68f),17)
+                setOnClickListener { action("notification_action_$i") }
+            }
+            actions.addView(b,LinearLayout.LayoutParams(dp(86),dp(34)).apply { marginStart=dp(6) })
+        }
+        if(e.intent != null) {
+            val open=TextView(context).apply {
+                text="Open"; textSize=12f; setTextColor(white); gravity=Gravity.CENTER
+                background=rounded(Color.rgb(42,40,48),17); isClickable=true; isFocusable=true
+                setOnClickListener { action("open") }
+            }
+            actions.addView(open,LinearLayout.LayoutParams(dp(67),dp(34)).apply { marginStart=dp(6) })
+        }
+        panel.addView(actions,LinearLayout.LayoutParams(-1,dp(37)).apply { topMargin=dp(8) })
     }
 
     private fun control(row: LinearLayout, icon: Int, desc: String, primary: Boolean, click: () -> Unit) {
