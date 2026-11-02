@@ -40,6 +40,8 @@ class IslandRuntime(val host: View) {
     private var errors = 0
     private var currentKey: String? = null
     private var autoExpandKey: String? = null
+    private var selectedNotificationKey: String? = null
+    private var lastDrawKey: String? = null
     private var animator: ValueAnimator? = null
     private val hiddenIcons = linkedMapOf<View, Float>()
     private val panel = LinearLayout(context).apply {
@@ -221,6 +223,7 @@ class IslandRuntime(val host: View) {
                 ?: runCatching { n.smallIcon?.loadDrawable(context) }.getOrNull(), actions = actions)
         while (events.size > 32) events.remove(events.keys.firstOrNull { it != "media" } ?: break)
         if (enabled("auto_expand_notifications") && !call && !timer) autoExpandKey = id
+        selectedNotificationKey = null
         Diagnostics.record("Notif accepted: package=${sbn.packageName} type=${if(call) "call" else if(timer) "timer" else "alert"} eligible=${eligible()}")
         Diagnostics.publish(context)
         redraw()
@@ -228,6 +231,7 @@ class IslandRuntime(val host: View) {
     fun removed(key: String) { safe {
         recentDelivery.remove(key)
         events.remove(key)
+        if (selectedNotificationKey == key) selectedNotificationKey = null
         redraw()
     } }
 
@@ -277,7 +281,11 @@ class IslandRuntime(val host: View) {
         val now = SystemClock.elapsedRealtime()
         val candidate = events[sbn.key]
         if (candidate?.kind != "notification" || candidate.expires <= now ||
-            !attached || !panel.isAttachedToWindow || currentKey != sbn.key || !expanded) return false
+            !attached || !panel.isAttachedToWindow || currentKey != sbn.key || !expanded ||
+            !Policy.mayReplaceHeadsUp(candidate.kind, n.fullScreenIntent != null,
+                sbn.isClearable || boostedCharging, 
+                (n.flags and (Notification.FLAG_ONGOING_EVENT or Notification.FLAG_FOREGROUND_SERVICE) != 0) && !boostedCharging,
+                n.visibility == Notification.VISIBILITY_SECRET)) return false
         Diagnostics.record("Replaced OEM heads-up visual: package=${sbn.packageName}")
         Diagnostics.publish(context)
         return true
@@ -306,12 +314,29 @@ class IslandRuntime(val host: View) {
 
     private fun eligible() = enabled("enabled") && power.isInteractive && !keyguard.isKeyguardLocked &&
         host.isAttachedToWindow && host.isShown && context.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT
+
+    private fun pendingNotifications(now: Long = SystemClock.elapsedRealtime()) =
+        events.values.filter { it.kind == "notification" && it.expires > now }.sortedByDescending { it.time }
+
+    private fun nextNotification() {
+        val items = pendingNotifications()
+        if (items.size < 2) return
+        val current = selectedNotificationKey ?: currentKey
+        val index = items.indexOfFirst { it.key == current }
+        selectedNotificationKey = items[(index + 1).coerceAtLeast(0) % items.size].key
+        autoExpandKey = selectedNotificationKey
+        redraw()
+    }
     private fun redraw() {
         main.removeCallbacks(expiry)
         main.removeCallbacks(progressTick)
         val now = SystemClock.elapsedRealtime()
         events.entries.removeAll { it.value.expires <= now }
-        val key = Policy.select(events.values.map { EventRank(it.key, it.priority, it.time, it.expires) }, now)
+        val selected = Policy.select(events.values.map { EventRank(it.key, it.priority, it.time, it.expires) }, now)
+        val manual = selectedNotificationKey?.let { events[it] }?.takeIf {
+            it.expires > now && it.kind == "notification" && (events[selected]?.priority ?: 0) <= 65
+        }
+        val key = manual?.key ?: selected
         val event = events[key]
         if (!eligible() || (event == null && !enabled("idle"))) {
             currentKey = null; expanded = false; hide(); return
@@ -326,7 +351,7 @@ class IslandRuntime(val host: View) {
             expanded = true
             autoExpandKey = null
             main.removeCallbacks(collapse)
-            main.postDelayed(collapse, 5200L)
+            main.postDelayed(collapse, value("alert_duration", 3000, 12000).toLong())
         }
         if (event != null) {
             val nextExpiry = events.values.minOfOrNull { it.expires } ?: Long.MAX_VALUE
@@ -350,20 +375,21 @@ class IslandRuntime(val host: View) {
         val cameraOnly = compactWidth < cutoutWidth + dp(58)
         val width = when {
             expanded && event?.kind == "notification" -> minOf(dp(310), screenWidth - dp(32))
+            expanded && event?.kind == "charging" -> minOf(dp(292), screenWidth - dp(32))
+            expanded && (event?.kind == "call" || event?.kind == "timer") -> minOf(dp(310), screenWidth - dp(32))
             expanded -> minOf(dp(330), screenWidth - dp(24))
             event == null || cameraOnly -> idleWidth
             else -> compactWidth
         }
         val height = when {
             expanded && event?.kind == "notification" -> {
-                val reservedPx = ((cutout?.bottom ?: dp(25)) - params.y + dp(8)).coerceAtLeast(dp(37))
-                val lines = Policy.alertPreviewLines(event.text)
-                val rowHeightDp = maxOf(44, 24 + 19 * lines)
-                // ~174dp for brief notices, ~215dp for a four-line preview.
-                // Always account for the physical camera clearance.
-                maxOf(dp(174), reservedPx + dp(16 + 9 + rowHeightDp + 11 + 36 + 9 + 5))
+                val cameraPx = ((cutout?.bottom ?: dp(25)) - params.y + dp(9)).coerceAtLeast(dp(38))
+                Policy.alertCardHeightDp(Policy.alertPreviewLines(event.text).coerceAtMost(value("alert_lines",2,6)),
+                    (cameraPx / context.resources.displayMetrics.density).toInt(), event.actions.isNotEmpty() || event.intent != null).let(::dp)
             }
-            expanded -> maxOf(dp(254), compactHeight + dp(197))
+            expanded && event?.kind == "charging" -> maxOf(dp(156), compactHeight + dp(116))
+            expanded && (event?.kind == "call" || event?.kind == "timer") -> maxOf(dp(190), compactHeight + dp(140))
+            expanded -> maxOf(dp(248), compactHeight + dp(195))
             event == null || cameraOnly -> idleHeight
             else -> compactHeight
         }
@@ -379,7 +405,8 @@ class IslandRuntime(val host: View) {
             if (!expanded && cameraOnly) {
                 visuals.idle()
             } else visuals.render(event, expanded, clearance, cutoutWidth + dp(8),
-                compactHeight, enabled("chroma"), enabled("motion")) { which ->
+                compactHeight, enabled("chroma"), enabled("motion"),
+                value("alert_lines", 2, 6), if (enabled("notification_queue")) pendingNotifications(now).size else 0) { which ->
                 safe {
                     when (which) {
                         "previous" -> event.media?.transportControls?.skipToPrevious()
@@ -398,6 +425,13 @@ class IslandRuntime(val host: View) {
                             expanded = false; redraw()
                         }
                         "collapse" -> { expanded = false; redraw() }
+                        "queue_next" -> nextNotification()
+                        "dismiss_card" -> {
+                            events.remove(event.key)
+                            selectedNotificationKey = null
+                            expanded = false
+                            redraw()
+                        }
                     }
                 }
             }
