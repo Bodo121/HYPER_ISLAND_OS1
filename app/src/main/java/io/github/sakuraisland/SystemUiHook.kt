@@ -107,8 +107,8 @@ class SystemUiHook : IXposedHookLoadPackage {
         // island has been validated on-device for each notification source.
         var hooks = 0
         val listenerNames = listOf(
-            "com.android.systemui.statusbar.notification.collection.NotifCollection\\$1",
-            "com.android.systemui.statusbar.notification.collection.coalescer.GroupCoalescer\\$1"
+            "com.android.systemui.statusbar.notification.collection.NotifCollection\$1",
+            "com.android.systemui.statusbar.notification.collection.coalescer.GroupCoalescer\$1"
         )
         val postingSignature = listOf(
             StatusBarNotification::class.java,
