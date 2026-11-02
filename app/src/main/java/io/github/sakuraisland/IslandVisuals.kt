@@ -27,7 +27,7 @@ internal class IslandVisuals(private val context: Context, private val panel: Li
     private val sakura = Color.rgb(255, 117, 151)
     private val white = Color.rgb(243, 243, 245)
     private val secondary = Color.rgb(182, 179, 189)
-    private var mediaProgress: ProgressBar? = null
+    private var mediaProgress: ScrubTrack? = null
     private var timeLabel: TextView? = null
     private var durationLabel: TextView? = null
     private var player: MediaController? = null
@@ -125,8 +125,8 @@ internal class IslandVisuals(private val context: Context, private val panel: Li
      * Visual shell is split when expanded: a narrow camera cap at the top, and a wider
      * card beginning below the status row. Outside the cap the top corners are transparent.
      */
-    fun render(e: IslandEvent, expanded: Boolean, topClearancePx: Int, compactCapPx: Int,
-               chroma: Boolean, motion: Boolean, action: (String) -> Unit) {
+    fun render(e: IslandEvent, expanded: Boolean, topClearancePx: Int, cameraCapPx: Int,
+               compactHeightPx: Int, chroma: Boolean, motion: Boolean, action: (String) -> Unit) {
         player = e.media
         durationMs = e.media?.metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION)?.coerceAtLeast(0L) ?: 0L
         mediaProgress = null; timeLabel = null; durationLabel = null; dragging = false
@@ -138,7 +138,7 @@ internal class IslandVisuals(private val context: Context, private val panel: Li
         panel.clipToOutline = false
         val accent = if(e.kind == "charging") Color.rgb(0,230,118)
             else if(chroma) artColor(e.art) else sakura
-        panel.background = IslandShape(expanded, compactCapPx, dp(30), accent, dp(28), dp(22))
+        panel.background = IslandShape(expanded, cameraCapPx, compactHeightPx.coerceAtLeast(dp(34)), accent, dp(28), dp(22))
 
         if (!expanded) {
             val row = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
@@ -152,12 +152,12 @@ internal class IslandVisuals(private val context: Context, private val panel: Li
                     animateBars = motion
                 }
             } else text(when(e.kind) {
-                "charging" -> e.text
+                "charging" -> if (android.os.Build.DEVICE == "taoyao") "67W MAX" else e.text
                 "call" -> "Call"
                 "timer" -> "Timer"
                 else -> "●"
             },12f,if(e.kind=="charging") Color.rgb(105,255,163) else white),
-                LinearLayout.LayoutParams(dp(if(e.kind=="charging") 66 else 36), dp(24)))
+                LinearLayout.LayoutParams(dp(if(e.kind=="charging") 68 else 36), dp(24)))
             panel.addView(row, LinearLayout.LayoutParams(-1, dp(30)))
         } else {
             val eyebrow = text(when(e.kind) {
@@ -167,7 +167,20 @@ internal class IslandVisuals(private val context: Context, private val panel: Li
                 "timer" -> "ALARM / TIMER"
                 else -> "NOTIFICATION"
             },10f, mix(accent,white,.42f),true).apply { letterSpacing = .16f }
-            panel.addView(eyebrow, LinearLayout.LayoutParams(-1,dp(18)))
+            val eyebrowRow = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
+            eyebrowRow.addView(eyebrow, LinearLayout.LayoutParams(0,dp(18),1f))
+            // Hardware support is documented by Xiaomi. These are capability labels:
+            // they do not claim Dolby processing is active or 67 W is being delivered.
+            if (android.os.Build.DEVICE == "taoyao" && (e.kind == "media" || e.kind == "charging")) {
+                val capability = text(if(e.kind == "media") "DOLBY ATMOS" else "UP TO 67W",10f,
+                    if(e.kind == "charging") Color.rgb(116,255,169) else secondary,true).apply {
+                    contentDescription = if(e.kind == "media") "Device supports Dolby Atmos; current audio effect state unknown"
+                        else "Device supports charging up to 67 watts; actual charging power unknown"
+                    gravity = Gravity.CENTER_VERTICAL or Gravity.END
+                }
+                eyebrowRow.addView(capability,LinearLayout.LayoutParams(-2,dp(18)))
+            }
+            panel.addView(eyebrowRow,LinearLayout.LayoutParams(-1,dp(18)))
             val row = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
             row.addView(image(e,64,14))
             val names = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_VERTICAL }
@@ -177,21 +190,15 @@ internal class IslandVisuals(private val context: Context, private val panel: Li
             panel.addView(row,LinearLayout.LayoutParams(-1,dp(76)).apply { topMargin = dp(4) })
 
             if (e.kind == "media" && durationMs > 0L) {
-                val seek = SeekBar(context).apply {
-                    max = 1000
-                    progressTintList = ColorStateList.valueOf(mix(accent,white,.35f))
-                    progressBackgroundTintList = ColorStateList.valueOf(Color.rgb(66,61,72))
-                    thumbTintList = ColorStateList.valueOf(mix(accent,white,.35f))
-                    isEnabled = (e.media?.playbackState?.actions ?: 0L) and PlaybackState.ACTION_SEEK_TO != 0L
-                    setOnSeekBarChangeListener(object: SeekBar.OnSeekBarChangeListener {
-                        override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {}
-                        override fun onStartTrackingTouch(seekBar: SeekBar?) { dragging = true }
-                        override fun onStopTrackingTouch(seekBar: SeekBar?) {
-                            val target = ((progress.toLong() * durationMs) / 1000L).coerceIn(0L,durationMs)
-                            e.media?.transportControls?.seekTo(target)
-                            dragging = false
-                        }
-                    })
+                val accentColor = accent
+                val seek = ScrubTrack(context).apply {
+                    accent = mix(accentColor, Color.WHITE, .35f)
+                    seekEnabled = (e.media?.playbackState?.actions ?: 0L) and PlaybackState.ACTION_SEEK_TO != 0L
+                    onDragChanged = { dragging = it }
+                    onSeek = { progress ->
+                        val target = ((progress.toLong() * durationMs) / 1000L).coerceIn(0L,durationMs)
+                        e.media?.transportControls?.seekTo(target)
+                    }
                 }
                 mediaProgress = seek
                 panel.addView(seek, LinearLayout.LayoutParams(-1,dp(28)).apply { topMargin = dp(2) })
@@ -237,18 +244,123 @@ internal class IslandVisuals(private val context: Context, private val panel: Li
     }
 
     private fun control(row: LinearLayout, icon: Int, desc: String, primary: Boolean, click: () -> Unit) {
-        val button = ImageButton(context).apply {
-            setImageResource(icon)
-            imageTintList = ColorStateList.valueOf(if(primary) Color.BLACK else white)
-            contentDescription = desc
-            background = rounded(if(primary) white else Color.rgb(46,43,51),22)
-            scaleType = ImageView.ScaleType.CENTER_INSIDE
-            setPadding(dp(12),dp(12),dp(12),dp(12))
-            setOnClickListener { click() }
-        }
-        row.addView(button,LinearLayout.LayoutParams(dp(44),dp(44)).apply {
+        val control = TransportButton(context, desc, primary).apply { setOnClickListener { click() } }
+        row.addView(control,LinearLayout.LayoutParams(dp(44),dp(44)).apply {
             marginStart = dp(3); marginEnd = dp(3)
         })
+    }
+
+    /** Draw vector playback symbols, avoiding Android's pixelated legacy drawable icons. */
+    private class TransportButton(context: Context, private val label: String,
+                                  private val primary: Boolean) : View(context) {
+        private val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+        private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND
+        }
+        init {
+            contentDescription = label
+            isClickable = true
+            isFocusable = true
+        }
+        override fun onDraw(canvas: Canvas) {
+            super.onDraw(canvas)
+            val cx = width/2f; val cy = height/2f
+            val d = resources.displayMetrics.density
+            val rad = 19*d
+            if(primary) {
+                p.color = Color.rgb(244,244,246)
+                canvas.drawCircle(cx,cy,rad,p)
+            }
+            p.color = if(primary) Color.BLACK else Color.rgb(241,238,245)
+            stroke.color = p.color; stroke.strokeWidth = 2.1f*d
+            val unit = 1*d
+            when(label) {
+                "Play" -> {
+                    val path = android.graphics.Path().apply {
+                        moveTo(cx-5*unit,cy-8*unit); lineTo(cx+8*unit,cy)
+                        lineTo(cx-5*unit,cy+8*unit); close()
+                    }
+                    canvas.drawPath(path,p)
+                }
+                "Pause" -> {
+                    canvas.drawRoundRect(RectF(cx-7*unit,cy-8*unit,cx-2*unit,cy+8*unit),1.2f*unit,1.2f*unit,p)
+                    canvas.drawRoundRect(RectF(cx+2*unit,cy-8*unit,cx+7*unit,cy+8*unit),1.2f*unit,1.2f*unit,p)
+                }
+                "Previous","Next" -> {
+                    val forward = label == "Next"
+                    val sign = if(forward) 1f else -1f
+                    val path = android.graphics.Path().apply {
+                        moveTo(cx-7*unit*sign,cy-8*unit)
+                        lineTo(cx+5*unit*sign,cy)
+                        lineTo(cx-7*unit*sign,cy+8*unit)
+                        close()
+                    }
+                    canvas.drawPath(path,p)
+                    val lineX = cx+8*unit*sign
+                    canvas.drawRoundRect(RectF(lineX-1.3f*unit,cy-8*unit,lineX+1.3f*unit,cy+8*unit),1.0f*unit,1.0f*unit,p)
+                }
+                "Open" -> {
+                    canvas.drawLine(cx-7*unit,cy+7*unit,cx+7*unit,cy-7*unit,stroke)
+                    canvas.drawLine(cx-1*unit,cy-7*unit,cx+7*unit,cy-7*unit,stroke)
+                    canvas.drawLine(cx+7*unit,cy-7*unit,cx+7*unit,cy+1*unit,stroke)
+                }
+                "Collapse" -> {
+                    canvas.drawLine(cx-6*unit,cy-6*unit,cx+6*unit,cy+6*unit,stroke)
+                    canvas.drawLine(cx-6*unit,cy+6*unit,cx+6*unit,cy-6*unit,stroke)
+                }
+            }
+        }
+    }
+
+    /** A 3dp progress track; thumb appears only while seeking, no oversized default SeekBar thumb. */
+    private class ScrubTrack(context: Context): View(context) {
+        var accent: Int = Color.rgb(255,117,151)
+        var progress: Int = 0
+            set(value) { field = value.coerceIn(0,1000); invalidate() }
+        var seekEnabled = false
+        var onDragChanged: ((Boolean) -> Unit)? = null
+        var onSeek: ((Int) -> Unit)? = null
+        private var seeking = false
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        private val d get() = resources.displayMetrics.density
+        override fun onDraw(canvas: Canvas) {
+            super.onDraw(canvas)
+            val y = height/2f
+            val thick = 3*d
+            paint.color = Color.rgb(61,59,66)
+            canvas.drawRoundRect(RectF(0f,y-thick/2,width.toFloat(),y+thick/2),thick,thick,paint)
+            paint.color = accent
+            val end = width*progress/1000f
+            canvas.drawRoundRect(RectF(0f,y-thick/2,end.coerceAtLeast(thick/2),y+thick/2),thick,thick,paint)
+            if(seeking) canvas.drawCircle(end,y,5*d,paint)
+        }
+        override fun onTouchEvent(event: android.view.MotionEvent): Boolean {
+            if (!seekEnabled) return false
+            when(event.actionMasked) {
+                android.view.MotionEvent.ACTION_DOWN -> {
+                    seeking = true
+                    parent?.requestDisallowInterceptTouchEvent(true)
+                    onDragChanged?.invoke(true)
+                    adjust(event.x)
+                    return true
+                }
+                android.view.MotionEvent.ACTION_MOVE -> { adjust(event.x); return true }
+                android.view.MotionEvent.ACTION_UP -> {
+                    adjust(event.x)
+                    onSeek?.invoke(progress)
+                    seeking = false; onDragChanged?.invoke(false)
+                    invalidate(); performClick(); return true
+                }
+                android.view.MotionEvent.ACTION_CANCEL -> {
+                    seeking = false; onDragChanged?.invoke(false); invalidate(); return true
+                }
+            }
+            return super.onTouchEvent(event)
+        }
+        private fun adjust(x: Float) {
+            progress = (1000f*x/width.coerceAtLeast(1)).toInt().coerceIn(0,1000)
+        }
+        override fun performClick(): Boolean { super.performClick(); return true }
     }
 
     private class IslandShape(
@@ -269,7 +381,7 @@ internal class IslandVisuals(private val context: Context, private val panel: Li
                 paint.shader = null
                 paint.color = Color.BLACK
                 val left = ((w - capWidth) / 2).coerceAtLeast(0f)
-                canvas.drawRoundRect(RectF(left,0f,w-left,(headHeight+capRadius).toFloat()),
+                canvas.drawRoundRect(RectF(left,0f,w-left,(headHeight+capRadius/3).toFloat()),
                     capRadius.toFloat(),capRadius.toFloat(),paint)
             } else {
                 paint.shader = null; paint.color = Color.BLACK
