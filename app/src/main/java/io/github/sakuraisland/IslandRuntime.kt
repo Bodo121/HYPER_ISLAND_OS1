@@ -91,6 +91,7 @@ class IslandRuntime(val host: View) {
         override fun onReceive(c: Context, i: Intent) { safe {
             when (i.action) {
                 NotificationManager.ACTION_INTERRUPTION_FILTER_CHANGED -> refreshDndState()
+                android.media.AudioManager.RINGER_MODE_CHANGED_ACTION -> refreshRingerState()
                 Intent.ACTION_SCREEN_OFF -> { expanded = false; hide() }
                 Intent.ACTION_USER_PRESENT, Intent.ACTION_CONFIGURATION_CHANGED, Intent.ACTION_SCREEN_ON -> { expanded = false; redraw() }
                 Intent.ACTION_BATTERY_CHANGED -> {
@@ -119,6 +120,25 @@ class IslandRuntime(val host: View) {
     private var lastBatteryLevel = -1
     private val notificationManager by lazy { context.getSystemService(NotificationManager::class.java) }
     private var lastZenMode: Int? = null
+    private val audioManager by lazy { context.getSystemService(android.media.AudioManager::class.java) }
+    private var lastRingerMode: Int? = null
+    fun refreshRingerState() { safe {
+        val mode = audioManager?.ringerMode ?: return@safe
+        val previous = lastRingerMode
+        lastRingerMode = mode
+        if (previous == null || previous == mode || !enabled("enabled")) return@safe
+        val label = when(mode) {
+            android.media.AudioManager.RINGER_MODE_SILENT -> "Silent mode"
+            android.media.AudioManager.RINGER_MODE_VIBRATE -> "Vibrate mode"
+            else -> "Sound is on"
+        }
+        events["ringer"] = IslandEvent("ringer", label, "Sound profile changed", 93,
+            expires=SystemClock.elapsedRealtime()+3500L, kind="system")
+        autoExpandKey="ringer"
+        redraw()
+        Diagnostics.record("Ringer status reflected in island: mode=$mode")
+    } }
+
     /** DND state change is a system status event, not an ordinary app notification. */
     fun refreshDndState() { safe {
         val mode = notificationManager?.currentInterruptionFilter ?: return@safe
@@ -168,10 +188,12 @@ class IslandRuntime(val host: View) {
             addAction(Intent.ACTION_CONFIGURATION_CHANGED); addAction(Intent.ACTION_BATTERY_CHANGED)
             addAction(Intent.ACTION_SCREEN_ON)
             addAction(NotificationManager.ACTION_INTERRUPTION_FILTER_CHANGED)
+            addAction(android.media.AudioManager.RINGER_MODE_CHANGED_ACTION)
         }, Context.RECEIVER_NOT_EXPORTED)
         host.addOnLayoutChangeListener(layoutListener)
         loadConfig()
         refreshDndState()
+        refreshRingerState()
     }
     private val relayout = Runnable { safe { redraw() } }
     private val layoutListener = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
