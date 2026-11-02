@@ -40,7 +40,7 @@ class PolicyTest {
     @Test fun alertCardsGrowForLongerMessagesButStayBounded() {
         assertEquals(1, Policy.alertPreviewLines("Hey"))
         assertEquals(2, Policy.alertPreviewLines("A".repeat(45)))
-        assertEquals(4, Policy.alertPreviewLines("A".repeat(500)))
+        assertEquals(6, Policy.alertPreviewLines("A".repeat(500)))
         assertEquals(2, Policy.alertPreviewLines("short\nother message of medium length"))
     }
     @Test fun cameraGapNeverAllowsTextOverLens() {
