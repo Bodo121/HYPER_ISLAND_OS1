@@ -128,6 +128,46 @@ class SystemUiHook : IXposedHookLoadPackage {
                     }
                 }
         }
+        // The exact taoyao MiuiSystemUI.apk includes StrongToastModel#getCharge()
+        // and #getChargeLevel(). Filter by the typed charging field: unrelated OEM
+        // strong toasts (privacy/calls/security) continue through Xiaomi unchanged.
+        Diagnostics.guard("charging strong-toast replacement setup") {
+            var installed = 0
+            val classNames = listOf(
+                "com.android.systemui.toast.MIUIStrongToastControl",
+                "com.android.systemui.toast.MIUIStrongToast"
+            )
+            classNames.forEach { name ->
+                val cls = XposedHelpers.findClassIfExists(name, loader) ?: return@forEach
+                cls.declaredMethods.filter { method ->
+                    method.name == "showCustomStrongToast" &&
+                        method.returnType == Void.TYPE && method.parameterTypes.size == 1 &&
+                        method.parameterTypes[0].name == "com.android.systemui.toast.bean.StrongToastModel"
+                }.forEach { method ->
+                    Diagnostics.guard("charging strong-toast hook") {
+                        XposedBridge.hookMethod(method, object : XC_MethodHook() {
+                            override fun beforeHookedMethod(param: MethodHookParam) {
+                                val model = param.args.firstOrNull() ?: return
+                                val charge = runCatching {
+                                    XposedHelpers.callMethod(model, "getCharge") as? String
+                                }.getOrNull().orEmpty()
+                                if(charge.isBlank()) return
+                                val level = runCatching {
+                                    (XposedHelpers.callMethod(model, "getChargeLevel") as? Number)?.toFloat()
+                                }.getOrNull() ?: Float.NaN
+                                val shouldReplace = runCatching {
+                                    runtime?.replaceNativeChargeToast(charge, level) == true
+                                }.getOrDefault(false)
+                                if (shouldReplace) param.result = null
+                            }
+                        })
+                        installed++
+                        Diagnostics.record("HOOK typed Xiaomi charging strong-toast: ${method.toGenericString()}")
+                    }
+                }
+            }
+            Diagnostics.record("Xiaomi charging strong-toast hooks installed=$installed")
+        }
         // Observe both native collection delivery and its coalescer. Their callbacks
         // may be used on different Xiaomi build paths. Runtime deduplicates by sbn.key.
         // No native notification is suppressed: preserve system delivery until the
@@ -253,7 +293,7 @@ class SystemUiHook : IXposedHookLoadPackage {
             names.forEach { name ->
                 val cls = XposedHelpers.findClassIfExists(name, loader) ?: return@forEach
                 cls.declaredMethods.filter { method ->
-                    method.name in setOf("shouldHeadsUp", "shouldHeadsUpEver", "shouldHeadsUpAgain") &&
+                    method.name in setOf("shouldHeadsUp", "shouldHeadsUpEver", "shouldHeadsUpAgain", "checkHeadsUp") &&
                         method.returnType == Boolean::class.javaPrimitiveType &&
                         method.parameterTypes.isNotEmpty() &&
                         method.parameterTypes.first().name ==
