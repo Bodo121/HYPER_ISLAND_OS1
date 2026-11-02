@@ -330,7 +330,7 @@ class IslandRuntime(val host: View) {
         // The notification may be at the heads-up decision stage *before*
         // the collection listener posts it. Create its island event now.
         // Reentrancy is bounded by recentDelivery, and a failure never blocks OEM UI.
-        if (events[sbn.key]?.expires ?: 0L <= SystemClock.elapsedRealtime()) posted(sbn)
+        if ((events[sbn.key]?.expires ?: 0L) <= SystemClock.elapsedRealtime()) posted(sbn)
         val candidate = events[sbn.key] ?: return false
         if (candidate.kind != "notification" || candidate.expires <= SystemClock.elapsedRealtime() ||
             !attached || !panel.isAttachedToWindow) return false
