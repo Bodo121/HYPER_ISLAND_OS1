@@ -72,6 +72,14 @@ class PolicyTest {
         assertEquals("new", Policy.nextAlertKey(keys, "missing"))
         assertNull(Policy.nextAlertKey(emptyList(), null))
     }
+    @Test fun actionableXiaomiChargeBoostPreemptsPassiveBatteryCard() {
+        assertTrue(Policy.isXiaomiChargeBoost("com.miui.securitycenter",
+            "Stop boosting charging speed", true))
+        assertFalse(Policy.isXiaomiChargeBoost("com.miui.securitycenter",
+            "Stop boosting charging speed", false))
+        assertFalse(Policy.isXiaomiChargeBoost("com.whatsapp",
+            "Stop boosting charging speed", true))
+    }
     @Test fun exactTargetOnly() {
         assertTrue(Policy.target(34, "taoyao", "OS1.0.39.0.ULIEUXM"))
         assertFalse(Policy.target(35, "taoyao", "OS1.0.39.0.ULIEUXM"))
