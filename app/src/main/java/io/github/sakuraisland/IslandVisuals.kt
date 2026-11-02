@@ -115,7 +115,8 @@ internal class IslandVisuals(private val context: Context, private val panel: Li
         player = null; mediaProgress = null
         panel.removeAllViews()
         panel.setPadding(0,0,0,0)
-        panel.setBackgroundColor(Color.BLACK)
+        panel.background = rounded(Color.BLACK,24)
+        panel.clipToOutline = true
         panel.contentDescription = "Idle camera capsule"
         panel.setOnClickListener(null)
         panel.setOnTouchListener(null)
