@@ -168,6 +168,37 @@ class SystemUiHook : IXposedHookLoadPackage {
             }
             Diagnostics.record("Xiaomi charging strong-toast hooks installed=$installed")
         }
+        // Xiaomi VolumeDialogImpl hosts the floating sound / DND presentation.
+        // Suppress its show animation only for the 1.8-second window following a
+        // genuine ringer or DND transition. Ordinary volume adjustment remains
+        // native, and no AudioManager/NotificationManager operation is changed.
+        Diagnostics.guard("Xiaomi sound popup hook setup") {
+            var count=0
+            listOf(
+                "com.android.systemui.volume.VolumeDialogImpl",
+                "com.android.systemui.miui.volume.MiuiVolumeDialogImpl",
+                "com.android.systemui.volume.MiuiVolumeDialogImpl"
+            ).forEach { name ->
+                val cls=XposedHelpers.findClassIfExists(name,loader) ?: return@forEach
+                cls.declaredMethods.filter { m ->
+                    m.name=="showH" && m.returnType==Void.TYPE &&
+                        m.parameterTypes.size==1 && m.parameterTypes[0]==Integer.TYPE
+                }.forEach { method ->
+                    Diagnostics.guard("sound popup hook") {
+                        XposedBridge.hookMethod(method, object: XC_MethodHook() {
+                            override fun beforeHookedMethod(param: MethodHookParam) {
+                                if (Looper.myLooper()!=Looper.getMainLooper()) return
+                                if (runCatching { runtime?.onXiaomiSoundPopup()==true }.getOrDefault(false))
+                                    param.result=null
+                            }
+                        })
+                        count++
+                        Diagnostics.record("HOOK Xiaomi sound popup ${method.toGenericString()}")
+                    }
+                }
+            }
+            Diagnostics.record("Xiaomi volume sound-popup hooks installed=$count")
+        }
         // Observe both native collection delivery and its coalescer. Their callbacks
         // may be used on different Xiaomi build paths. Runtime deduplicates by sbn.key.
         // Native collection delivery is never suppressed. Only later visual
