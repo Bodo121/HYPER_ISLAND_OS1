@@ -154,6 +154,10 @@ internal class IslandVisuals(private val context: Context, private val panel: Li
             panel.contentDescription = "${e.title}, notification preview; tap Open for full message."
             return
         }
+        if (expanded && e.kind == "system") {
+            renderSystemStatus(e)
+            return
+        }
         if (expanded && e.kind == "charging") {
             renderCharging(e, accent, action)
             return
@@ -405,6 +409,21 @@ internal class IslandVisuals(private val context: Context, private val panel: Li
         panel.addView(actions,LinearLayout.LayoutParams(-1,dp(36)).apply { topMargin=dp(8) })
     }
 
+    /** DND and ringer state are Android-observed facts, not fake Xiaomi banners. */
+    private fun renderSystemStatus(e: IslandEvent) {
+        val status = text("SYSTEM STATUS", 10f, secondary, true).apply { letterSpacing = .12f }
+        panel.addView(status, LinearLayout.LayoutParams(-1,dp(18)))
+        val label = text(e.title, 19f, white, true).apply {
+            maxLines = 2
+            ellipsize = TextUtils.TruncateAt.END
+        }
+        panel.addView(label,LinearLayout.LayoutParams(-1,dp(48)).apply { topMargin=dp(5) })
+        panel.addView(text(e.text,12.5f,secondary).apply {
+            maxLines = 2; ellipsize=TextUtils.TruncateAt.END
+        },LinearLayout.LayoutParams(-1,dp(37)))
+        panel.contentDescription = "${e.title}: ${e.text}"
+    }
+
     /** Native Xiaomi charge mode is informational; never assume real-time 67 W. */
     private fun renderCharging(e: IslandEvent, accent: Int, action: (String) -> Unit) {
         val head = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
@@ -594,7 +613,9 @@ internal class IslandVisuals(private val context: Context, private val panel: Li
             if (expanded) {
                 // Draw one continuous silhouette. The old cap extended over a
                 // separately rounded card, creating the visible 'bulb' at its join.
-                val cardTop = (headHeight - capRadius * .44f).coerceAtLeast(0f)
+                // A straight-edged bridge joins the camera-safe top cap to the
+                // body; never draw the old rounded lower cap as a separate blob.
+                val cardTop = (headHeight - capRadius * .58f).coerceAtLeast(0f)
                 paint.shader = LinearGradient(0f,cardTop,w,h,
                     intArrayOf(mixColor(accent,shade,.46f),mixColor(accent,shade,.73f),shade),
                     null, Shader.TileMode.CLAMP)
@@ -602,11 +623,11 @@ internal class IslandVisuals(private val context: Context, private val panel: Li
                 paint.shader = null
                 paint.color = Color.BLACK
                 val left = ((w - capWidth) / 2).coerceAtLeast(0f)
-                val cap = RectF(left,0f,w-left,headHeight.toFloat())
-                canvas.drawRoundRect(cap,capRadius.toFloat(),capRadius.toFloat(),paint)
-                // Fill the lower curve of the cap flush into the card, avoiding
-                // a visible raised lobe between the lens surround and card body.
-                canvas.drawRect(left,cardTop,w-left,headHeight.toFloat(),paint)
+                // Only the top rim gets rounding; all lower edges of the cap
+                // connect seamlessly to the background's wide card.
+                canvas.drawRoundRect(RectF(left,0f,w-left,cardTop+capRadius),
+                    capRadius.toFloat(),capRadius.toFloat(),paint)
+                canvas.drawRect(left,cardTop,w-left,cardTop+capRadius,paint)
             } else {
                 paint.shader = null; paint.color = Color.BLACK
                 canvas.drawRoundRect(RectF(0f,0f,w,h),capRadius.toFloat(),capRadius.toFloat(),paint)
