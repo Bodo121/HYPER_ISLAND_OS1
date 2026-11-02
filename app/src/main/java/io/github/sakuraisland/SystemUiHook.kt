@@ -45,7 +45,7 @@ class SystemUiHook : IXposedHookLoadPackage {
         val incremental = property("ro.mi.os.version.incremental")
         val version = Policy.romVersion(incremental, Build.VERSION.INCREMENTAL, name)
         val compatible = Policy.target(Build.VERSION.SDK_INT, Build.DEVICE, version)
-        Diagnostics.record("SakuraIsland 0.1.1 experimental; SDK=${Build.VERSION.SDK_INT}; device=${Build.DEVICE}; ROM=$version; exactTarget=$compatible")
+        Diagnostics.record("SakuraIsland 0.3 experimental; SDK=${Build.VERSION.SDK_INT}; device=${Build.DEVICE}; ROM=$version; exactTarget=$compatible")
         Diagnostics.record("ro.mi.os.version.name=$name")
         Diagnostics.record("ro.mi.os.version.incremental=$incremental")
         Diagnostics.record("ro.build.version.incremental=${Build.VERSION.INCREMENTAL}")
@@ -56,7 +56,13 @@ class SystemUiHook : IXposedHookLoadPackage {
             "com.android.systemui.statusbar.notification.collection.NotifCollection\$1",
             "com.android.systemui.statusbar.policy.HeadsUpManager",
             "com.android.systemui.statusbar.NotificationMediaManager",
-            "miui.systemui.dynamicisland.window.content.DynamicIslandContentView")
+            "miui.systemui.dynamicisland.window.content.DynamicIslandContentView",
+            // Confirmed by examining the user's installed Xiaomi SystemUI APK.
+            // Read-only detection; no blind constructor/method hooks.
+            "com.android.systemui.toast.MIUIStrongToast",
+            "com.android.systemui.toast.MIUIStrongToastControl",
+            "com.miui.charge.container.MiuiChargeAnimationView",
+            "com.miui.charge.container.MiuiChargeContainerView")
         candidates.forEach { name -> Diagnostics.guard("probe $name") {
             val cls = XposedHelpers.findClassIfExists(name, loader)
             if (cls == null) Diagnostics.record("MISSING $name") else {
