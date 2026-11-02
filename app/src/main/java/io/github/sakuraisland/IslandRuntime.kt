@@ -5,6 +5,7 @@ import android.content.*
 import android.database.ContentObserver
 import android.graphics.*
 import android.graphics.drawable.GradientDrawable
+import android.content.res.ColorStateList
 import android.media.MediaMetadata
 import android.media.session.*
 import android.media.session.MediaController
@@ -106,11 +107,18 @@ class IslandRuntime(val host: View) {
             }
         } catch (_: Exception) { next["enabled"] = "false"; Diagnostics.record("Settings unavailable; rendering disabled") }
         main.post { safe {
+            val hadMedia = enabled("enabled") && enabled("media")
             options = next
-            events.clear(); expanded = false
-            media?.stop(); media = null
-            if (enabled("enabled") && enabled("media")) {
+            val needsMedia = enabled("enabled") && enabled("media")
+            if (!needsMedia && media != null) {
+                media?.stop(); media = null; events.remove("media")
+            }
+            if (needsMedia && (media == null || !hadMedia)) {
                 media = MediaSource(context, main) { controller -> safe { updateMedia(controller) } }.also { it.start() }
+            }
+            if (!enabled("enabled")) {
+                events.clear()
+                expanded = false
             }
             redraw(); Diagnostics.publish(context)
         } }
@@ -152,19 +160,31 @@ class IslandRuntime(val host: View) {
         val now = SystemClock.elapsedRealtime(); events.entries.removeAll { it.value.expires <= now }
         val key = Policy.select(events.values.map { EventRank(it.key, it.priority, it.time, it.expires) }, now)
         val event = events[key]
-        if (!eligible() || event == null) { currentKey = null; expanded = false; hide(); return }
-        if (currentKey != key) { expanded = false; currentKey = key }
-        val nextExpiry = events.values.minOf { it.expires }
-        if (nextExpiry != Long.MAX_VALUE) main.postDelayed(expiry, (nextExpiry - now).coerceAtLeast(1))
-        buildContent(event)
+        if (!eligible() || (event == null && !enabled("idle"))) {
+            currentKey = null; expanded = false; hide(); return
+        }
+        if (event == null) {
+            currentKey = null
+            expanded = false
+            buildIdleContent()
+        } else {
+            if (currentKey != key) { expanded = false; currentKey = key }
+            val nextExpiry = events.values.minOf { it.expires }
+            if (nextExpiry != Long.MAX_VALUE) main.postDelayed(expiry, (nextExpiry - now).coerceAtLeast(1))
+            buildContent(event)
+        }
+        // An idle pill is purely decorative and must not intercept status bar touches.
+        params.flags = params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+        if (event == null) params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
         val cutout = host.rootWindowInsets?.displayCutout?.boundingRectTop?.takeUnless { it.isEmpty }
         val screenWidth = context.resources.displayMetrics.widthPixels
         params.x = if (cutout != null) cutout.centerX() - screenWidth / 2 else 0
         val compactHeight = maxOf(dp(value("height", 28, 52)), (cutout?.bottom ?: 0) + dp(4))
         params.y = ((cutout?.top ?: dp(6)) + dp(value("offset", -4, 24))).coerceAtLeast(0)
         val cutoutWidth = (cutout?.width() ?: 0) + dp(24)
-        val width = minOf(maxOf(dp(if (expanded) 340 else value("width", 120, 240)), if (expanded) 0 else cutoutWidth), screenWidth - dp(24))
-        val height = if (expanded) maxOf(dp(174), compactHeight + dp(120)) else compactHeight
+        val targetWidth = if (event == null) maxOf(dp(78), cutoutWidth) else maxOf(dp(if (expanded) 340 else value("width", 120, 240)), if (expanded) 0 else cutoutWidth)
+        val width = minOf(targetWidth, screenWidth - dp(24))
+        val height = if (expanded) maxOf(dp(164), compactHeight + dp(118)) else compactHeight
         if (!attached) {
             params.width = width; params.height = height
             window.addView(panel, params); attached = true
@@ -189,6 +209,13 @@ class IslandRuntime(val host: View) {
     private fun text(value: String, size: Float) = TextView(context).apply {
         text = value; textSize = size; setTextColor(Color.WHITE); maxLines = if (expanded) 2 else 1
         ellipsize = android.text.TextUtils.TruncateAt.END
+    }
+    private fun buildIdleContent() {
+        panel.removeAllViews()
+        panel.setPadding(0, 0, 0, 0)
+        panel.setOnClickListener(null)
+        panel.setOnTouchListener(null)
+        panel.contentDescription = "Sakura Island idle"
     }
     private fun buildContent(e: IslandEvent) {
         panel.removeAllViews(); panel.setPadding(dp(14), if (expanded) dp(42) else dp(2), dp(14), dp(4))
