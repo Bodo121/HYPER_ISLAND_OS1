@@ -196,10 +196,15 @@ class IslandRuntime(val host: View) {
             ?.takeUnless { it.isBlank() } ?: sbn.packageName
         // A number of apps publish a short ticker in EXTRA_TEXT and a full
         // preview in EXTRA_BIG_TEXT. Prefer the longest permitted public text.
-        val preview = listOfNotNull(
-            n.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString(),
-            n.extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
-        ).maxByOrNull { it.length }?.trim()?.takeUnless { it.isBlank() }
+        val lastChatText = runCatching {
+            (n.extras.getParcelableArray(Notification.EXTRA_MESSAGES)?.lastOrNull()
+                as? Bundle)?.getCharSequence("text")?.toString()
+        }.getOrNull()
+        val preview = (lastChatText?.takeUnless { it.isBlank() }
+            ?: listOfNotNull(
+                n.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString(),
+                n.extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
+            ).maxByOrNull { it.length })?.trim()?.takeUnless { it.isBlank() }
             ?: "Open notification"
         // Action PendingIntents are kept in memory only; never serialized/logged.
         val actions = n.actions?.asSequence()?.filter {
