@@ -156,8 +156,7 @@ class IslandRuntime(val host: View) {
     /** Called from native SystemUI's incoming notification stream; never leaks alert text to logs. */
     fun posted(sbn: StatusBarNotification) { safe {
         val now = SystemClock.elapsedRealtime()
-        if (!enabled("enabled") || !enabled("notifications") && sbn.notification.category != Notification.CATEGORY_CALL
-            && sbn.notification.category != Notification.CATEGORY_ALARM) return@safe
+        if (!enabled("enabled")) return@safe
         if (sbn.user != UserHandle.getUserHandleForUid(Process.myUid()) &&
             sbn.user.identifier != -1) {
             Diagnostics.record("Notif ignored: different Android user (package=${sbn.packageName})")
