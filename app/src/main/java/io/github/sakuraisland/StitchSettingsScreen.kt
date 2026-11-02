@@ -97,11 +97,11 @@ private fun PreviewControls(label: String, onClick: () -> Unit) {
 private fun PreviewIsland(state: String, expanded: Boolean, idleWidth: Float, idleHeight: Float, changeExpanded: () -> Unit) {
     val accent = when (state) {
         "Charging" -> Color(0xFF00E676)
-        "Notification" -> Color(0xFF8BC9EF)
+        "Notification" -> Color(0xFF966A9F)
         "Call" -> Color(0xFF7DD9BE)
         else -> Sakura
     }
-    Box(Modifier.fillMaxWidth().height(if (expanded) 216.dp else 114.dp)
+    Box(Modifier.fillMaxWidth().height(if (expanded && state=="Notification") 203.dp else if (expanded) 216.dp else 114.dp)
         .clip(RoundedCornerShape(18.dp)).background(Color(0xFF0D0C12))
         .animateContentSize(spring(dampingRatio = 0.82f, stiffness = Spring.StiffnessMediumLow)),
         contentAlignment = Alignment.TopCenter) {
@@ -111,8 +111,8 @@ private fun PreviewIsland(state: String, expanded: Boolean, idleWidth: Float, id
             Text("▮  ◕  ▰", color = Muted, fontSize = 10.sp)
         }
         val shape = RoundedCornerShape(if (expanded) 26.dp else 22.dp)
-        Column(Modifier.padding(top = 13.dp).width(if (expanded) 318.dp else if (state == "Idle") idleWidth.dp else 174.dp)
-            .height(if (expanded) 178.dp else if (state == "Idle") idleHeight.dp else 39.dp).shadow(if (state == "Idle") 0.dp else 12.dp, shape)
+        Column(Modifier.padding(top = 13.dp).width(if (expanded && state=="Notification") 294.dp else if (expanded) 318.dp else if (state == "Idle") idleWidth.dp else 174.dp)
+            .height(if (expanded && state=="Notification") 165.dp else if (expanded) 178.dp else if (state == "Idle") idleHeight.dp else 39.dp).shadow(if (state == "Idle") 0.dp else 12.dp, shape)
             .clip(shape)
             .background(Brush.verticalGradient(listOf(
                 if (expanded) accent.copy(alpha = 0.31f) else Color.Black,
@@ -134,8 +134,9 @@ private fun PreviewIsland(state: String, expanded: Boolean, idleWidth: Float, id
                     Column(Modifier.weight(1f)) {
                         Text(when (state) { "Notification" -> "New message"; "Charging" -> "Charging"; "Call" -> "Incoming call"; else -> "Sakura Dreams" },
                             color = Paper, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(when (state) { "Charging" -> "Battery status preview"; "Notification" -> "Message preview"; "Call" -> "Tap to answer in your dialer"; else -> "Demo artist" },
-                            color = Muted, fontSize = 12.sp, maxLines = 1)
+                        Text(when (state) { "Charging" -> "89% · Up to 67W supported"; "Notification" -> "A readable message preview that can wrap to several lines instead of clipping immediately"; "Call" -> "Open the call in your dialer"; else -> "Demo artist" },
+                            color = Muted, fontSize = 12.sp, maxLines = if(state=="Notification") 3 else 1,
+                            overflow=TextOverflow.Ellipsis, lineHeight=16.sp)
                     }
                 }
                 Spacer(Modifier.height(15.dp))
@@ -270,11 +271,32 @@ fun SakuraSettingsScreen(
                 }
             }
             item {
+                SectionHeader("Charging & overlays", "Never write charging limits or alter Xiaomi's power service.")
+                GlassCard {
+                    ConfigToggle("Expand when charger connects",
+                        "Show a short battery card instead of only the camera-safe compact indicators",
+                        enabled("charging_expand")) { set("charging_expand",it.toString()) }
+                    HorizontalDivider(color = Hairline)
+                    ConfigToggle("Hide overlapping status icons (experimental)",
+                        "Only while the actual island overlaps them. Defaults off for stability.",
+                        enabled("icons")) { set("icons",it.toString()) }
+                    Text("67W is the phone's rated maximum, not a live charging-power reading.",
+                        fontSize=11.sp,color=Muted,modifier=Modifier.padding(top=8.dp))
+                }
+            }
+            item {
                 SectionHeader("Notification apps", "Allow all apps or restrict alerts to the package IDs below.")
                 GlassCard {
                     ConfigToggle("All apps", "Show eligible alerts from every installed application", enabled("all_apps")) { set("all_apps",it.toString()) }
                     HorizontalDivider(color = Hairline, modifier = Modifier.padding(vertical = 8.dp))
                     ConfigToggle("Auto-expand new alerts", "Open the island briefly when an app message arrives",enabled("auto_expand_notifications")) { set("auto_expand_notifications",it.toString()) }
+                    HorizontalDivider(color = Hairline, modifier = Modifier.padding(vertical = 8.dp))
+                    ConfigToggle("Notification queue", "Switch between recent notifications without opening the shade",
+                        enabled("notification_queue")) { set("notification_queue",it.toString()) }
+                    ConfigSlider("Message preview lines",number("alert_lines",2f,6f),2f..6f,"lines") { set("alert_lines",it.toInt().toString()) }
+                    ConfigSlider("Alert reading time",number("alert_duration",3000f,12000f)/1000f,3f..12f,"seconds") {
+                        set("alert_duration",(it.toInt()*1000).toString())
+                    }
                     HorizontalDivider(color = Hairline, modifier = Modifier.padding(vertical = 8.dp))
                     ConfigToggle("Replace Xiaomi pop-up banners",
                         "Only hide standard visual heads-up banners after SakuraIsland displays the same alert. Calls, alarms, and full-screen alerts stay native.",
@@ -308,7 +330,7 @@ fun SakuraSettingsScreen(
                     }
                 }
                 Spacer(Modifier.height(10.dp))
-                Text("0.3 experimental  ·  No telemetry  ·  No overlay permission", color = Muted, fontSize = 11.sp)
+                Text("0.4 experimental  ·  No background root service  ·  SystemUI scope", color = Muted, fontSize = 11.sp)
             }
         }
     }
