@@ -12,7 +12,8 @@ object Config {
     val diagnostics: Uri = Uri.parse("content://io.github.sakuraisland.config/diagnostics")
     val defaults = linkedMapOf("enabled" to "false", "media" to "true", "notifications" to "true",
         "calls" to "true", "charging" to "true", "timers" to "true",
-        "all_apps" to "true", "auto_expand_notifications" to "true", "replace_heads_up" to "true", "icons" to "false",
+        "all_apps" to "true", "auto_expand_notifications" to "true", "replace_heads_up" to "true", "alert_lines" to "4", "alert_duration" to "5200",
+        "charging_expand" to "false", "notification_queue" to "true", "icons" to "false",
         "idle" to "true", "idle_width" to "104", "idle_height" to "34", "chroma" to "true", "motion" to "true",
         "width" to "184", "height" to "36", "offset" to "0", "speed" to "300",
         "apps" to "com.whatsapp,org.telegram.messenger,io.github.sakuraisland")
