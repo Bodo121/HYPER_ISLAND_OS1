@@ -239,6 +239,46 @@ class SystemUiHook : IXposedHookLoadPackage {
             }
             Diagnostics.record("Guarded heads-up replacements installed=$replacements")
         }
-        Diagnostics.record("Notification observation callbacks installed=$hooks; heads-up replaced only for verified island cards")
+        // Xiaomi may decide whether to display the banner before HeadsUpManager
+        // receives showNotification(). Hook the public decision path as a fallback.
+        // We only turn TRUE -> FALSE if the matching alert is *already drawn*.
+        // Full-screen calls, alarms and system exceptions are protected by runtime.
+        Diagnostics.guard("heads-up interrupt decision setup") {
+            val names = listOf(
+                "com.android.systemui.statusbar.notification.interruption.NotificationInterruptStateProviderImpl",
+                "com.android.systemui.statusbar.notification.interruption.MiuiNotificationInterruptStateProviderImpl",
+                "com.android.systemui.statusbar.notification.interruption.NotificationInterruptStateProviderWrapper"
+            )
+            var installed = 0
+            names.forEach { name ->
+                val cls = XposedHelpers.findClassIfExists(name, loader) ?: return@forEach
+                cls.declaredMethods.filter { method ->
+                    method.name == "shouldHeadsUp" && method.returnType == Boolean::class.javaPrimitiveType &&
+                        method.parameterTypes.isNotEmpty() &&
+                        method.parameterTypes.first().name ==
+                            "com.android.systemui.statusbar.notification.collection.NotificationEntry" &&
+                        method.parameterTypes.drop(1).all { it == Boolean::class.javaPrimitiveType }
+                }.forEach { method ->
+                    Diagnostics.guard("heads-up decision hook") {
+                        XposedBridge.hookMethod(method, object : XC_MethodHook() {
+                            override fun afterHookedMethod(param: MethodHookParam) {
+                                if (param.hasThrowable() || param.result != true) return
+                                val entry = param.args.firstOrNull() ?: return
+                                val sbn = runCatching {
+                                    XposedHelpers.callMethod(entry, "getSbn") as? StatusBarNotification
+                                }.getOrNull() ?: return
+                                if (runtime?.showInsteadOfHeadsUp(sbn) == true) {
+                                    param.result = false
+                                }
+                            }
+                        })
+                        installed++
+                        Diagnostics.record("HOOK heads-up policy ${method.toGenericString()}")
+                    }
+                }
+            }
+            Diagnostics.record("Heads-up decision hooks installed=$installed")
+        }
+        Diagnostics.record("Notification observation callbacks installed=$hooks; native shade and critical alerts retained")
     }
 }
