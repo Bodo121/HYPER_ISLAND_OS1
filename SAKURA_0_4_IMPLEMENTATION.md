@@ -34,3 +34,10 @@ All changes are committed on the EXISTING feat/stitch-sakura-ui-integration bran
 8. Test important calls, alarms, lockscreen, screen rotation, media controls and 30-minute stability. Disable replacement toggles if any alert is missed.
 
 Do NOT globally disable Android heads-up, alter /sys power limits, or upload Xiaomi proprietary APKs. Do not merge or publish a stable APK before successful on-device validation.
+
+## RemoteInput reply implementation and visual notification ownership
+
+- The notification card shows a real **Reply** button only when the originating app publishes a free-form Android RemoteInput action. It opens a focusable, system-owned dialog with the keyboard and calls RemoteInput.addResultsToIntent + the original PendingIntent. No fake reply control is shown for apps without compatible actions.
+- After sending, an exact outgoing-text echo of that notification is ignored for up to six seconds so a user doesn't see their own sent message as a new island alert. New, different incoming messages under the same conversation key are still processed. Reply text stays in volatile SystemUI memory and is not persisted or logged.
+- Existing Xiaomi heads-up and eligible native charging-toast interception remain selective and reversible; ordinary notifications remain present in the Android notification shade and retain sounds/vibrations. The module deliberately does **not** blanket-disable every system toast, which would remove privacy indicators, low battery/security notices and call/emergency UI on this ROM.
+- On-device tests: WhatsApp Reply, Send and Cancel, keyboard opening, new incoming message just after sending, duplicate Xiaomi heads-up in both app drawer and browser, and a critical incoming call. In Settings, ensure Replace Xiaomi pop-up banners is enabled. Export only sanitized diagnostics.
