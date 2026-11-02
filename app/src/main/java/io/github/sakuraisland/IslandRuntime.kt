@@ -342,7 +342,14 @@ class IslandRuntime(val host: View) {
             else -> compactWidth
         }
         val height = when {
-            expanded && event?.kind == "notification" -> maxOf(dp(213), compactHeight + dp(162))
+            expanded && event?.kind == "notification" -> {
+                val reservedPx = ((cutout?.bottom ?: dp(25)) - params.y + dp(8)).coerceAtLeast(dp(37))
+                val lines = Policy.alertPreviewLines(event.text)
+                val rowHeightDp = maxOf(44, 24 + 19 * lines)
+                // ~174dp for brief notices, ~215dp for a four-line preview.
+                // Always account for the physical camera clearance.
+                maxOf(dp(174), reservedPx + dp(16 + 9 + rowHeightDp + 11 + 36 + 9 + 5))
+            }
             expanded -> maxOf(dp(254), compactHeight + dp(197))
             event == null || cameraOnly -> idleHeight
             else -> compactHeight
