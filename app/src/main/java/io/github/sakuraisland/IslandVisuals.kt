@@ -193,7 +193,7 @@ internal class IslandVisuals(private val context: Context, private val panel: Li
             if (e.kind == "media" && durationMs > 0L) {
                 val accentColor = accent
                 val seek = ScrubTrack(context).apply {
-                    accent = mix(accentColor, Color.WHITE, .35f)
+                    this.accent = mix(accentColor, Color.WHITE, .35f)
                     seekEnabled = (e.media?.playbackState?.actions ?: 0L) and PlaybackState.ACTION_SEEK_TO != 0L
                     onDragChanged = { dragging = it }
                     onSeek = { progress ->
