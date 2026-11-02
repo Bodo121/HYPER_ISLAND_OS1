@@ -43,6 +43,22 @@ class PolicyTest {
         assertEquals(4, Policy.alertPreviewLines("A".repeat(500)))
         assertEquals(2, Policy.alertPreviewLines("short\nother message of medium length"))
     }
+    @Test fun cameraGapNeverAllowsTextOverLens() {
+        assertEquals(88, Policy.compactSideWidth(420, 80, 42))
+        assertEquals(0, Policy.compactSideWidth(150, 100, 30))
+    }
+    @Test fun variableAlertHeightIsBounded() {
+        assertTrue(Policy.alertCardHeightDp(4, 42, true) >
+            Policy.alertCardHeightDp(1, 42, true))
+        assertTrue(Policy.alertCardHeightDp(6, 160, true) <= 320)
+    }
+    @Test fun onlyOrdinaryAlertsCanReplaceHeadsUp() {
+        assertTrue(Policy.mayReplaceHeadsUp("notification", false, true, false, false))
+        assertFalse(Policy.mayReplaceHeadsUp("call", false, true, false, false))
+        assertFalse(Policy.mayReplaceHeadsUp("notification", true, true, false, false))
+        assertFalse(Policy.mayReplaceHeadsUp("notification", false, false, true, false))
+        assertFalse(Policy.mayReplaceHeadsUp("notification", false, true, false, true))
+    }
     @Test fun exactTargetOnly() {
         assertTrue(Policy.target(34, "taoyao", "OS1.0.39.0.ULIEUXM"))
         assertFalse(Policy.target(35, "taoyao", "OS1.0.39.0.ULIEUXM"))
