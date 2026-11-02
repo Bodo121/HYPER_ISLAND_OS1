@@ -44,7 +44,7 @@ object Policy {
     /** One reusable queue rotation rule, with wraparound and expiry handled by caller. */
     fun nextAlertKey(keys: List<String>, current: String?): String? {
         if (keys.isEmpty()) return null
-        val index = keys.indexOf(current)
+        val index = if (current == null) -1 else keys.indexOf(current)
         return keys[(index + 1) % keys.size]
     }
 
