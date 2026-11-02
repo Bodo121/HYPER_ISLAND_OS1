@@ -240,6 +240,8 @@ fun SakuraSettingsScreen(
                     HorizontalDivider(color = Hairline)
                     ConfigToggle("Motion effects", "Animated equalizer and capsule morphing", enabled("motion")) { set("motion",it.toString()) }
                     HorizontalDivider(color = Hairline)
+                    ConfigToggle("High refresh animations", "Request the highest supported refresh rate up to 120 Hz for the island window (OS may override)", enabled("high_refresh")) { set("high_refresh",it.toString()) }
+                    HorizontalDivider(color = Hairline)
                     ConfigToggle("Subtle touch feedback", "Vibrate only for your intentional island gestures", enabled("haptics")) { set("haptics",it.toString()) }
                     ConfigSlider("Idle capsule width", number("idle_width",72f,132f),72f..132f,"dp") { set("idle_width",it.toInt().toString()) }
                     ConfigSlider("Idle capsule height",number("idle_height",28f,44f),28f..44f,"dp") { set("idle_height",it.toInt().toString()) }
