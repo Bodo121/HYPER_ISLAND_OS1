@@ -163,6 +163,11 @@ internal class IslandVisuals(private val context: Context, private val panel: Li
             return
         }
 
+        if (expanded && e.kind == "media") {
+            renderMusic(e, accent, action)
+            return
+        }
+
         if (!expanded) {
             // Three absolute zones: left icon | actual camera lens + buffer | right data.
             // No weighted Space that can shrink on long charging percentage strings.
@@ -278,6 +283,57 @@ internal class IslandVisuals(private val context: Context, private val panel: Li
             panel.addView(controls,LinearLayout.LayoutParams(-1,dp(48)).apply { topMargin = dp(7) })
         }
         panel.contentDescription = "${e.title}, ${e.text}. ${if(expanded) "Expanded" else "Tap to expand"}."
+    }
+
+    /** Short premium player: restrained typography, artwork-led ambient color and no idle gaps. */
+    private fun renderMusic(e: IslandEvent, accent: Int, action: (String) -> Unit) {
+        val header = text("NOW PLAYING", 9.5f, mix(white,accent,.34f),true).apply {
+            letterSpacing=.13f
+        }
+        panel.addView(header,LinearLayout.LayoutParams(-1,dp(17)))
+        val row=LinearLayout(context).apply { gravity=Gravity.CENTER_VERTICAL }
+        row.addView(image(e,56,12),LinearLayout.LayoutParams(dp(56),dp(56)))
+        val track=LinearLayout(context).apply { orientation=LinearLayout.VERTICAL; gravity=Gravity.CENTER_VERTICAL }
+        track.addView(text(e.title,14.5f,white,true).apply { maxLines=1 },
+            LinearLayout.LayoutParams(-1,dp(24)))
+        track.addView(text(e.text,11.5f,secondary).apply { maxLines=1 },
+            LinearLayout.LayoutParams(-1,dp(19)))
+        row.addView(track,LinearLayout.LayoutParams(0,dp(56),1f).apply { marginStart=dp(11) })
+        panel.addView(row,LinearLayout.LayoutParams(-1,dp(57)).apply { topMargin=dp(5) })
+        if(durationMs>0L) {
+            val c=e.media
+            val seek=ScrubTrack(context).apply {
+                this.accent=mix(accent,white,.42f)
+                seekEnabled=(c?.playbackState?.actions ?: 0L) and PlaybackState.ACTION_SEEK_TO != 0L
+                onDragChanged={ dragging=it }
+                onSeek={ position -> c?.transportControls?.seekTo((position.toLong()*durationMs/1000).coerceIn(0,durationMs)) }
+            }
+            mediaProgress=seek
+            panel.addView(seek,LinearLayout.LayoutParams(-1,dp(19)).apply { topMargin=dp(8) })
+            val time=LinearLayout(context).apply { gravity=Gravity.CENTER_VERTICAL }
+            timeLabel=text("0:00",10f,secondary)
+            durationLabel=text(fmt(durationMs),10f,secondary)
+            time.addView(timeLabel,LinearLayout.LayoutParams(0,dp(15),1f))
+            time.addView(durationLabel,LinearLayout.LayoutParams(-2,dp(15)))
+            panel.addView(time,LinearLayout.LayoutParams(-1,dp(15)))
+            refreshProgress()
+        }
+        val transport=LinearLayout(context).apply {
+            gravity=Gravity.CENTER; orientation=LinearLayout.HORIZONTAL
+        }
+        val flags=e.media?.playbackState?.actions ?: 0L
+        if(flags and PlaybackState.ACTION_SKIP_TO_PREVIOUS != 0L)
+            control(transport,android.R.drawable.ic_media_previous,"Previous",false) { action("previous") }
+        if(flags and (PlaybackState.ACTION_PLAY_PAUSE or PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE) != 0L) {
+            val playing=e.media?.playbackState?.state==PlaybackState.STATE_PLAYING
+            control(transport,android.R.drawable.ic_media_play,if(playing)"Pause" else "Play",true) { action("playpause") }
+        }
+        if(flags and PlaybackState.ACTION_SKIP_TO_NEXT != 0L)
+            control(transport,android.R.drawable.ic_media_next,"Next",false) { action("next") }
+        if(e.intent!=null) control(transport,android.R.drawable.ic_menu_view,"Open",false) { action("open") }
+        control(transport,android.R.drawable.ic_menu_close_clear_cancel,"Collapse",false) { action("collapse") }
+        panel.addView(transport,LinearLayout.LayoutParams(-1,dp(45)).apply { topMargin=dp(5) })
+        panel.contentDescription="${e.title}, ${e.text}, music player"
     }
 
     /** Compact notification card: full multi-line preview, no media timeline or empty playback area. */
@@ -538,7 +594,7 @@ internal class IslandVisuals(private val context: Context, private val panel: Li
             if (expanded) {
                 val cardTop = (headHeight - 2).toFloat()
                 paint.shader = LinearGradient(0f,cardTop,w,h,
-                    intArrayOf(mixColor(accent,shade,.53f),mixColor(accent,shade,.83f),shade),
+                    intArrayOf(mixColor(accent,shade,.46f),mixColor(accent,shade,.73f),shade),
                     null, Shader.TileMode.CLAMP)
                 canvas.drawRoundRect(RectF(0f,cardTop,w,h),radius.toFloat(),radius.toFloat(),paint)
                 paint.shader = null
