@@ -246,6 +246,28 @@ fun SakuraSettingsScreen(
                 }
             }
             item {
+                SectionHeader("Xiaomi 12 Lite hardware", "Rated device features, not live processing or charger wattage.")
+                GlassCard {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Rounded.SurroundSound, null, tint = Sakura)
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Dolby Atmos", color = Paper, fontWeight = FontWeight.Medium, fontSize = 14.sp)
+                            Text("Supported audio technology; active state not monitored", color = Muted, fontSize = 11.sp)
+                        }
+                    }
+                    HorizontalDivider(color = Hairline, modifier = Modifier.padding(vertical = 12.dp))
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Rounded.Bolt, null, tint = Color(0xFF00E676))
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("67W Turbo Charging", color = Paper, fontWeight = FontWeight.Medium, fontSize = 14.sp)
+                            Text("Maximum supported power; actual watts vary", color = Muted, fontSize = 11.sp)
+                        }
+                    }
+                }
+            }
+            item {
                 SectionHeader("Notification apps")
                 GlassCard {
                     OutlinedTextField(value = apps, onValueChange = { apps = it.take(1024) },
