@@ -244,19 +244,29 @@ class IslandRuntime(val host: View) {
             !enabled("auto_expand_notifications") ||
             Looper.myLooper() != Looper.getMainLooper() || !eligible()) return false
         val n = sbn.notification
+        val hasSimpleAction = n.actions?.any {
+            it.actionIntent != null && it.remoteInputs.isNullOrEmpty()
+        } == true
+        val title = n.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
+        // Xiaomi's "Stop boosting charging speed" is an actionable ongoing
+        // Security/PowerKeeper banner. Permit replacing *only this kind* of
+        // OEM banner after its real Stop action has been copied into the card.
+        val boostedCharging = (sbn.packageName == "com.miui.securitycenter" ||
+            sbn.packageName == "com.miui.powerkeeper") &&
+            title.contains("boost", ignoreCase = true) &&
+            title.contains("charg", ignoreCase = true) && hasSimpleAction
         if (sbn.packageName == "com.android.systemui" || n.fullScreenIntent != null ||
             n.category == Notification.CATEGORY_CALL ||
             n.category == Notification.CATEGORY_MISSED_CALL ||
             n.category == Notification.CATEGORY_ALARM ||
             n.category == Notification.CATEGORY_REMINDER ||
             n.category == Notification.CATEGORY_ERROR ||
-            n.category == Notification.CATEGORY_SYSTEM ||
+            (n.category == Notification.CATEGORY_SYSTEM && !boostedCharging) ||
             n.visibility == Notification.VISIBILITY_SECRET ||
-            n.flags and (Notification.FLAG_ONGOING_EVENT or Notification.FLAG_FOREGROUND_SERVICE or Notification.FLAG_GROUP_SUMMARY) != 0 ||
-            !sbn.isClearable ||
-            (n.contentIntent == null && n.actions?.none {
-                it.actionIntent != null && it.remoteInputs.isNullOrEmpty()
-            } != false)) return false
+            n.flags and Notification.FLAG_GROUP_SUMMARY != 0 ||
+            ((n.flags and (Notification.FLAG_ONGOING_EVENT or Notification.FLAG_FOREGROUND_SERVICE) != 0 ||
+                !sbn.isClearable) && !boostedCharging) ||
+            (n.contentIntent == null && !hasSimpleAction)) return false
         // If the collection listener hasn't posted yet, handle it now.
         // Never suppress unless a real island event actually wins priority
         // and an island view is attached to the visible SystemUI host.
