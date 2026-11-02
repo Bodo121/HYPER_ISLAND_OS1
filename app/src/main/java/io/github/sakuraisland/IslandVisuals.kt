@@ -288,6 +288,8 @@ internal class IslandVisuals(private val context: Context, private val panel: Li
         fun actionChip(title:String, primary:Boolean, click:()->Unit) {
             val chip = TextView(context).apply {
                 text=title
+                maxLines=1
+                ellipsize=TextUtils.TruncateAt.END
                 textSize=12.5f
                 setTextColor(if(primary) white else secondary)
                 setTypeface(typeface,android.graphics.Typeface.BOLD)
