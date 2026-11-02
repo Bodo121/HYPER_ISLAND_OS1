@@ -16,5 +16,10 @@ object Policy {
         if (packageName.isBlank()) return false
         return allApps || allowlist.split(',').any { it.trim() == packageName }
     }
+    /** Conservative approximation for 310dp alert cards; actual TextView wraps at most 4 lines. */
+    fun alertPreviewLines(text: String): Int = text.split('\n').sumOf { line ->
+        ((line.length + 30) / 31).coerceAtLeast(1)
+    }.coerceIn(1,4)
+
     fun dimension(value: Int, min: Int, max: Int) = value.coerceIn(min, max)
 }
