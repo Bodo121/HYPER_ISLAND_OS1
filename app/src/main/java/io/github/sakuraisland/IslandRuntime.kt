@@ -191,11 +191,15 @@ class IslandRuntime(val host: View) {
         }
         val heading = n.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.take(120)
             ?.takeUnless { it.isBlank() } ?: sbn.packageName
-        val preview = n.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()
-            ?: n.extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
+        // A number of apps publish a short ticker in EXTRA_TEXT and a full
+        // preview in EXTRA_BIG_TEXT. Prefer the longest permitted public text.
+        val preview = listOfNotNull(
+            n.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString(),
+            n.extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
+        ).maxByOrNull { it.length }?.trim()?.takeUnless { it.isBlank() }
             ?: "Open notification"
         // No raw message content is recorded in diagnostics.
-        events[id] = IslandEvent(id, heading, preview.take(300), if (call) 100 else if (timer) 80 else 65,
+        events[id] = IslandEvent(id, heading, preview.take(750), if (call) 100 else if (timer) 80 else 65,
             now, now + if (call || timer) 30000 else 8500,
             n.contentIntent, dismissible = sbn.isClearable && !call && !timer,
             kind = if (call) "call" else if (timer) "timer" else "notification",
@@ -212,6 +216,42 @@ class IslandRuntime(val host: View) {
         events.remove(key)
         redraw()
     } }
+
+    /**
+     * Called synchronously from the privileged SystemUI heads-up renderer.
+     * Skip the OEM *visual banner only* when this exact standard notification
+     * has already been rendered as a visible expanded SakuraIsland card.
+     * Native notification records, sounds, vibrations, shade entries and
+     * full-screen/call/alarm behavior remain untouched.
+     */
+    fun showInsteadOfHeadsUp(sbn: StatusBarNotification): Boolean {
+        if (disposed || failed || !enabled("enabled") ||
+            !enabled("notifications") || !enabled("replace_heads_up") ||
+            !enabled("auto_expand_notifications") ||
+            Looper.myLooper() != Looper.getMainLooper() || !eligible()) return false
+        val n = sbn.notification
+        if (sbn.packageName == "com.android.systemui" || n.fullScreenIntent != null ||
+            n.category == Notification.CATEGORY_CALL ||
+            n.category == Notification.CATEGORY_MISSED_CALL ||
+            n.category == Notification.CATEGORY_ALARM ||
+            n.category == Notification.CATEGORY_REMINDER ||
+            n.category == Notification.CATEGORY_ERROR ||
+            n.category == Notification.CATEGORY_SYSTEM ||
+            n.visibility == Notification.VISIBILITY_SECRET ||
+            n.flags and (Notification.FLAG_ONGOING_EVENT or Notification.FLAG_FOREGROUND_SERVICE or Notification.FLAG_GROUP_SUMMARY) != 0 ||
+            !sbn.isClearable || n.contentIntent == null) return false
+        // If the collection listener hasn't posted yet, handle it now.
+        // Never suppress unless a real island event actually wins priority
+        // and an island view is attached to the visible SystemUI host.
+        if (events[sbn.key] == null) posted(sbn)
+        val now = SystemClock.elapsedRealtime()
+        val candidate = events[sbn.key]
+        if (candidate?.kind != "notification" || candidate.expires <= now ||
+            !attached || !panel.isAttachedToWindow || currentKey != sbn.key || !expanded) return false
+        Diagnostics.record("Replaced OEM heads-up visual: package=${sbn.packageName}")
+        Diagnostics.publish(context)
+        return true
+    }
     /**
      * OEM charging hook calls this with a Xiaomi-supported charging label.
      * Read-only: neither writes to power supply nor guesses live charger watts.
@@ -278,12 +318,14 @@ class IslandRuntime(val host: View) {
         val compactWidth = minOf(maxOf(dp(value("width", 120, 240)), cutoutWidth + dp(58)), safeWidth)
         val cameraOnly = compactWidth < cutoutWidth + dp(58)
         val width = when {
-            expanded -> minOf(dp(352), screenWidth - dp(18))
+            expanded && event?.kind == "notification" -> minOf(dp(310), screenWidth - dp(32))
+            expanded -> minOf(dp(330), screenWidth - dp(24))
             event == null || cameraOnly -> idleWidth
             else -> compactWidth
         }
         val height = when {
-            expanded -> maxOf(dp(268), compactHeight + dp(215))
+            expanded && event?.kind == "notification" -> maxOf(dp(213), compactHeight + dp(162))
+            expanded -> maxOf(dp(254), compactHeight + dp(197))
             event == null || cameraOnly -> idleHeight
             else -> compactHeight
         }
