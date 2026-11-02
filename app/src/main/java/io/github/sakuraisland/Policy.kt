@@ -19,7 +19,7 @@ object Policy {
     /** Conservative approximation for 310dp alert cards; actual TextView wraps at most 4 lines. */
     fun alertPreviewLines(text: String): Int = text.split('\n').sumOf { line ->
         ((line.length + 30) / 31).coerceAtLeast(1)
-    }.coerceIn(1,4)
+    }.coerceIn(1,6)
 
     /** Pixel-space camera safety; text never occupies the measured physical lens region. */
     fun compactSideWidth(totalPx: Int, cameraWidthPx: Int, marginPx: Int): Int =
