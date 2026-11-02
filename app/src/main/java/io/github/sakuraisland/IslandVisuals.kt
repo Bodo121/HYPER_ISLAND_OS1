@@ -81,7 +81,8 @@ internal class IslandVisuals(private val context: Context, private val panel: Li
                 "timer" -> android.R.drawable.ic_lock_idle_alarm
                 else -> android.R.drawable.ic_media_play
             })
-            scaleType = ImageView.ScaleType.CENTER_CROP
+            scaleType = if (event.art != null) ImageView.ScaleType.CENTER_CROP else ImageView.ScaleType.FIT_CENTER
+            if (event.art == null && event.appIcon != null) setPadding(dp(5),dp(5),dp(5),dp(5))
             background = rounded(mix(artColor(event.art), Color.BLACK, .63f), radius)
             clipToOutline = true
             contentDescription = when(event.kind) { "media" -> "Album art"; else -> "Activity icon" }
