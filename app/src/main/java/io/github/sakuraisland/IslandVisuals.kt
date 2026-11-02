@@ -332,7 +332,7 @@ internal class IslandVisuals(private val context: Context, private val panel: Li
             control(transport,android.R.drawable.ic_media_next,"Next",false) { action("next") }
         if(e.intent!=null) control(transport,android.R.drawable.ic_menu_view,"Open",false) { action("open") }
         control(transport,android.R.drawable.ic_menu_close_clear_cancel,"Collapse",false) { action("collapse") }
-        panel.addView(transport,LinearLayout.LayoutParams(-1,dp(45)).apply { topMargin=dp(5) })
+        panel.addView(transport,LinearLayout.LayoutParams(-1,dp(54)).apply { topMargin=dp(10); bottomMargin=dp(10) })
         panel.contentDescription="${e.title}, ${e.text}, music player"
     }
 
@@ -592,7 +592,9 @@ internal class IslandVisuals(private val context: Context, private val panel: Li
             if (w<=0 || h<=0) return
             val shade = Color.rgb(6,5,9)
             if (expanded) {
-                val cardTop = (headHeight - 2).toFloat()
+                // Draw one continuous silhouette. The old cap extended over a
+                // separately rounded card, creating the visible 'bulb' at its join.
+                val cardTop = (headHeight - capRadius * .44f).coerceAtLeast(0f)
                 paint.shader = LinearGradient(0f,cardTop,w,h,
                     intArrayOf(mixColor(accent,shade,.46f),mixColor(accent,shade,.73f),shade),
                     null, Shader.TileMode.CLAMP)
@@ -600,8 +602,11 @@ internal class IslandVisuals(private val context: Context, private val panel: Li
                 paint.shader = null
                 paint.color = Color.BLACK
                 val left = ((w - capWidth) / 2).coerceAtLeast(0f)
-                canvas.drawRoundRect(RectF(left,0f,w-left,(headHeight+capRadius/3).toFloat()),
-                    capRadius.toFloat(),capRadius.toFloat(),paint)
+                val cap = RectF(left,0f,w-left,headHeight.toFloat())
+                canvas.drawRoundRect(cap,capRadius.toFloat(),capRadius.toFloat(),paint)
+                // Fill the lower curve of the cap flush into the card, avoiding
+                // a visible raised lobe between the lens surround and card body.
+                canvas.drawRect(left,cardTop,w-left,headHeight.toFloat(),paint)
             } else {
                 paint.shader = null; paint.color = Color.BLACK
                 canvas.drawRoundRect(RectF(0f,0f,w,h),capRadius.toFloat(),capRadius.toFloat(),paint)

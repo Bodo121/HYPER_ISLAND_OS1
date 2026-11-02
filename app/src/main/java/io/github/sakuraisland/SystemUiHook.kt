@@ -287,7 +287,9 @@ class SystemUiHook : IXposedHookLoadPackage {
             val names = listOf(
                 "com.android.systemui.statusbar.notification.interruption.NotificationInterruptStateProviderImpl",
                 "com.android.systemui.statusbar.notification.interruption.MiuiNotificationInterruptStateProviderImpl",
-                "com.android.systemui.statusbar.notification.interruption.NotificationInterruptStateProviderWrapper"
+                "com.android.systemui.statusbar.notification.interruption.NotificationInterruptStateProviderWrapper",
+                "com.android.systemui.statusbar.notification.collection.coordinator.HeadsUpCoordinator",
+                "com.android.systemui.statusbar.notification.collection.coordinator.MiuiHeadsUpCoordinator"
             )
             var installed = 0
             names.forEach { name ->
