@@ -279,6 +279,10 @@ fun SakuraSettingsScreen(
                         "Show a short battery card instead of only the camera-safe compact indicators",
                         enabled("charging_expand")) { set("charging_expand",it.toString()) }
                     HorizontalDivider(color = Hairline)
+                    ConfigToggle("Replace Xiaomi charging toast",
+                        "Replace the native charging visual only when a genuine charge model is detected and SakuraIsland is visible",
+                        enabled("replace_charge_toast")) { set("replace_charge_toast",it.toString()) }
+                    HorizontalDivider(color = Hairline)
                     ConfigToggle("Hide overlapping status icons (experimental)",
                         "Only while the actual island overlaps them. Defaults off for stability.",
                         enabled("icons")) { set("icons",it.toString()) }
