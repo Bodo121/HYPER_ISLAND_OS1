@@ -6,8 +6,8 @@ android {
         applicationId = "io.github.sakuraisland"
         minSdk = 34
         targetSdk = 34
-        versionCode = 2
-        versionName = "0.1.1-experimental"
+        versionCode = 3
+        versionName = "0.2.0-experimental"
     }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }
