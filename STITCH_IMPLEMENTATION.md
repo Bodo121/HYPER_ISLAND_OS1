@@ -20,7 +20,7 @@ The project therefore preserves its existing `io.github.sakuraisland` ID and Sys
 | Idle camera capsule | Enabled, unlocked, portrait | Passive non-touchable 40dp minimum width, measured from real top display cutout |
 | Compact media | SystemUI MediaSessionManager | Real artwork, playback-aware animated equalizer; artwork is never represented by fake music data |
 | Expanded media | SystemUI MediaController | Album-derived ambient backdrop, current title/artist, real timeline and seek when ACTION_SEEK_TO is supported, genuine previous/play/next actions |
-| Notifications | SystemUI collection callbacks | Real notification app icon, text, and content PendingIntent when available |
+| Notifications | SystemUI collection + selective HUN interception | Real app icon, up to four lines of MessagingStyle/BigText preview, up to one safe direct action, adaptive card height, optional guarded native visual banner replacement |
 | Call and timer | Notification category | Category-appropriate presentation, without claiming native call handling not present in source |
 | Charging | BatteryManager sticky broadcast | Real integer battery level. No unsupported fractional percentage or guessed charging wattage |
 | Settings | ConfigProvider preferences | Real toggles, sliders persisted on release, app filter, compatibility report, self-test |
@@ -33,7 +33,7 @@ Android cannot safely reflow all apps' launcher content with a normal window ove
 
 ## Features intentionally not faked
 
-* **Inline quick reply** needs a secure, focusable text-input flow and a genuine `RemoteInput` action. The current implementation only offers the real notification content action.
+* **Inline quick reply** needs a secure, focusable text-input flow and a genuine `RemoteInput` action. The current implementation offers the real notification content action and up to one simple non-RemoteInput notification action; interactive in-place reply still needs a safe focusable input flow.
 * **Dolby Atmos** and **67W maximum Turbo Charging** are officially documented hardware capabilities of Xiaomi 12 Lite. We now label them as *supported* only on `Build.DEVICE == "taoyao"`; these labels do **not** claim active Dolby processing or current charging wattage. Live Hi-Res 96kHz, Buds device selection, and exact active wattage remain unimplemented. The uploaded UI had mock telemetry.
 * **Battery decimal percentages** are not exposed by regular battery broadcasts and are not fabricated.
 * **Native HyperOS blur** and modifications to other applications' layouts require separate runtime capabilities and testing. A native gradient fallback is used.
