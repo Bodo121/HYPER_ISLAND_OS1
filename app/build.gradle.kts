@@ -6,8 +6,8 @@ android {
         applicationId = "io.github.sakuraisland"
         minSdk = 34
         targetSdk = 34
-        versionCode = 4
-        versionName = "0.3.0-stitch-preview"
+        versionCode = 5
+        versionName = "0.4.0-experimental"
     }
     buildFeatures { compose = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
