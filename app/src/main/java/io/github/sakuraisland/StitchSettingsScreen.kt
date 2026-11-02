@@ -94,7 +94,7 @@ private fun PreviewControls(label: String, onClick: () -> Unit) {
 }
 
 @Composable
-private fun PreviewIsland(state: String, expanded: Boolean, changeExpanded: () -> Unit) {
+private fun PreviewIsland(state: String, expanded: Boolean, idleWidth: Float, idleHeight: Float, changeExpanded: () -> Unit) {
     val accent = when (state) {
         "Charging" -> Color(0xFF00E676)
         "Notification" -> Color(0xFF8BC9EF)
@@ -111,8 +111,8 @@ private fun PreviewIsland(state: String, expanded: Boolean, changeExpanded: () -
             Text("▮  ◕  ▰", color = Muted, fontSize = 10.sp)
         }
         val shape = RoundedCornerShape(if (expanded) 26.dp else 22.dp)
-        Column(Modifier.padding(top = 13.dp).width(if (expanded) 318.dp else if (state == "Idle") 48.dp else 174.dp)
-            .height(if (expanded) 178.dp else 39.dp).shadow(12.dp, shape)
+        Column(Modifier.padding(top = 13.dp).width(if (expanded) 318.dp else if (state == "Idle") idleWidth.dp else 174.dp)
+            .height(if (expanded) 178.dp else if (state == "Idle") idleHeight.dp else 39.dp).shadow(if (state == "Idle") 0.dp else 12.dp, shape)
             .clip(shape)
             .background(Brush.verticalGradient(listOf(
                 if (expanded) accent.copy(alpha = 0.31f) else Color.Black,
@@ -199,7 +199,7 @@ fun SakuraSettingsScreen(
             item {
                 SectionHeader("Live preview", "A visual demo; the real island uses SystemUI notifications and media sessions.")
                 GlassCard {
-                    PreviewIsland(chosen, expanded) { expanded = !expanded }
+                    PreviewIsland(chosen, expanded, number("idle_width",72f,132f), number("idle_height",28f,44f)) { expanded = !expanded }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                         listOf("Idle", "Music", "Notification", "Charging", "Call").forEach {
                             TextButton(onClick = { chosen = it; expanded = it != "Idle" },
@@ -238,6 +238,8 @@ fun SakuraSettingsScreen(
                     ConfigToggle("Ambient album colors", "Use artwork-derived gradients", enabled("chroma")) { set("chroma",it.toString()) }
                     HorizontalDivider(color = Hairline)
                     ConfigToggle("Motion effects", "Animated equalizer and capsule morphing", enabled("motion")) { set("motion",it.toString()) }
+                    ConfigSlider("Idle capsule width", number("idle_width",72f,132f),72f..132f,"dp") { set("idle_width",it.toInt().toString()) }
+                    ConfigSlider("Idle capsule height",number("idle_height",28f,44f),28f..44f,"dp") { set("idle_height",it.toInt().toString()) }
                     ConfigSlider("Compact width", number("width",120f,240f), 120f..240f, "dp") { set("width",it.toInt().toString()) }
                     ConfigSlider("Minimum height", number("height",28f,52f),28f..52f,"dp") { set("height",it.toInt().toString()) }
                     ConfigSlider("Camera vertical offset",number("offset",-4f,24f),-4f..24f,"dp") { set("offset",it.toInt().toString()) }
