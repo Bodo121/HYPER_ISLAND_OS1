@@ -23,7 +23,7 @@ data class IslandEvent(val key: String, val title: String, val text: String, val
     val intent: PendingIntent? = null, val art: Bitmap? = null, val media: MediaController? = null,
     val dismissible: Boolean = true, val kind: String = "notification",
     val appIcon: android.graphics.drawable.Drawable? = null,
-    val actions: List<IslandAction> = emptyList())
+    val actions: List<IslandAction> = emptyList(), val appLabel: String? = null)
 
 class IslandRuntime(val host: View) {
     private val context = host.context
@@ -240,7 +240,11 @@ class IslandRuntime(val host: View) {
             n.contentIntent, dismissible = sbn.isClearable && !call && !timer,
             kind = if (call) "call" else if (timer) "timer" else "notification",
             appIcon = applicationIcon(sbn.packageName)
-                ?: runCatching { n.smallIcon?.loadDrawable(context) }.getOrNull(), actions = actions)
+                ?: runCatching { n.smallIcon?.loadDrawable(context) }.getOrNull(), actions = actions,
+            appLabel = runCatching {
+                context.packageManager.getApplicationLabel(
+                    context.packageManager.getApplicationInfo(sbn.packageName, 0)).toString().take(30)
+            }.getOrNull())
         while (events.size > 32) events.remove(events.keys.firstOrNull { it != "media" } ?: break)
         if (enabled("auto_expand_notifications") && !call && !timer) autoExpandKey = id
         selectedNotificationKey = null
