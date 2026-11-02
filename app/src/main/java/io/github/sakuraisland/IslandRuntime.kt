@@ -33,6 +33,18 @@ class IslandRuntime(val host: View) {
     private val power = context.getSystemService(PowerManager::class.java)
     private var options = Config.defaults.toMap()
     private val events = linkedMapOf<String, IslandEvent>()
+    // Cache small launcher-icon ConstantStates, never store private notification text or Bitmaps.
+    private val appIconCache = object : LinkedHashMap<String, android.graphics.drawable.Drawable.ConstantState?>(20, .75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, android.graphics.drawable.Drawable.ConstantState?>) =
+            size > 20
+    }
+    private fun applicationIcon(packageName: String): android.graphics.drawable.Drawable? {
+        val cached = appIconCache[packageName]
+        if (cached != null) return cached.newDrawable(context.resources)
+        val icon = runCatching { context.packageManager.getApplicationIcon(packageName) }.getOrNull()
+        appIconCache[packageName] = icon?.constantState
+        return icon
+    }
     private var expanded = false
     private var attached = false
     private var disposed = false
@@ -123,7 +135,11 @@ class IslandRuntime(val host: View) {
         host.addOnLayoutChangeListener(layoutListener)
         loadConfig()
     }
-    private val layoutListener = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> safe { redraw() } }
+    private val relayout = Runnable { safe { redraw() } }
+    private val layoutListener = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+        main.removeCallbacks(relayout)
+        main.postDelayed(relayout, 48L)
+    }
     private fun loadConfig() { Diagnostics.io.execute {
         val next = Config.defaults.toMutableMap()
         try {
@@ -222,7 +238,7 @@ class IslandRuntime(val host: View) {
             now, now + if (call || timer) 30000 else 8500,
             n.contentIntent, dismissible = sbn.isClearable && !call && !timer,
             kind = if (call) "call" else if (timer) "timer" else "notification",
-            appIcon = runCatching { context.packageManager.getApplicationIcon(sbn.packageName) }.getOrNull()
+            appIcon = applicationIcon(sbn.packageName)
                 ?: runCatching { n.smallIcon?.loadDrawable(context) }.getOrNull(), actions = actions)
         while (events.size > 32) events.remove(events.keys.firstOrNull { it != "media" } ?: break)
         if (enabled("auto_expand_notifications") && !call && !timer) autoExpandKey = id
@@ -442,6 +458,7 @@ class IslandRuntime(val host: View) {
             panel.setOnClickListener {
                 safe {
                     if (eligible()) {
+                        if (enabled("haptics")) panel.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
                         expanded = !expanded
                         redraw()
                         main.removeCallbacks(collapse)
@@ -462,6 +479,7 @@ class IslandRuntime(val host: View) {
                         return true
                     }
                     override fun onLongPress(e: MotionEvent) {
+                        if (enabled("haptics")) panel.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
                         expanded = true
                         redraw()
                     }
@@ -549,6 +567,7 @@ class IslandRuntime(val host: View) {
     fun dispose() {
         disposed = true; main.removeCallbacksAndMessages(null); hide(); media?.stop(); media = null
         host.removeOnLayoutChangeListener(layoutListener)
+        appIconCache.clear()
         try { context.unregisterReceiver(receiver) } catch (_: Exception) { }
         context.contentResolver.unregisterContentObserver(observer); events.clear()
     }
